@@ -51,11 +51,16 @@ push 到 main ──→ 快车道（并发取消旧跑）
 
 提交拆解：
 
-### 提交 1 ci: push fast lane replaces the PR pipeline
+### 提交 1 ci: push fast lane replaces the PR pipeline ✅ 7ab88fb（+ 计划外 lint 烧债 688e8c9）
 
-- [ ] ci.yml 重写：push 触发（去 PR）、concurrency cancel、go-version-file、
-      build 只跑一次、补 web-test、lint 升 action v7 钉版本、各 job timeout-minutes；
-- [ ] release.yml 同步：go-version-file 收敛。
+- [x] ci.yml 重写：push 触发（去 PR）、concurrency cancel、go-version-file、
+      build 只跑一次、补 web-test、lint 升 action v7 钉 v2.13.2、各 job timeout-minutes；
+- [x] release.yml 同步：go-version-file 收敛；
+- [x] 计划外：修好的 lint 暴露 6 周存量（70 项，golangci 对同型消息去重后实为百余站点），
+      全部清零——机械修复、11 处死代码删除、三处 eino 重试钩迁移 ShouldRetry、controller
+      Requeue 弃用改固定步进、投影 chmod 与批次点火带显式 gosec 豁免、测试文件整体排除
+      gosec、make lint 限定模块真实包；本地 v2.13.2 与 CI 双归零，test-unit 44 包绿；
+      CI 首跑即绿（go-test 3m30s、web-test 17s、contracts-build 2m42s）。
 
 ### 提交 2 ci: gated nightly with the core regression
 
@@ -74,7 +79,8 @@ push 到 main ──→ 快车道（并发取消旧跑）
 
 验收：
 
-- [ ] push 后快车道全绿（首次包含 Vitest 层）；
+- [x] push 后快车道全绿（首次包含 Vitest 层；2026-09-20 run 35503790139：go-test 3m30s、
+      web-test 17s、contracts-build 2m42s 含 lint）；
 - [ ] workflow_dispatch 强制 nightly：bootstrap + core 全量回归 + docs + vk8s 在
       托管 runner 全绿；
 - [ ] gate 语义：同 sha 再次 dispatch 时重 job 被跳过；
