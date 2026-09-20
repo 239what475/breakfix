@@ -44,8 +44,10 @@ jobs:
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [ "$(date -u +%u)" = "7" ]; then
-            # Weekly unconditional sweep for drift behind floating tags.
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(date -u +%u)" = "7" ]; then
+            # Weekly unconditional sweep for drift behind floating tags. A
+            # manual dispatch never inherits the Sunday override: the button
+            # itself is the human decision, and force exists for it.
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
