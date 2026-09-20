@@ -99,6 +99,17 @@ core 集群已删除。
       k8s 1/1、ui 3/3、node 3/3、recovery 2/2，整链约 28 分钟（此前同等全量约
       45–55 分钟，三套件各自 prepare）。
 
+### 提交 5 test(e2e): bootstrap a disposable core target from an empty cluster ✅ cc6addd（验收后追加）
+
+- [x] `make e2e-bootstrap-core`：在空 Kind 集群上生成 core 剖面的全部可生成前置——runtime Secret
+      （随机数据库/JWT/Registry 凭据，prepare 链拥有的字段留空或占位，模型键由 docs prepare
+      覆盖、OpenSandbox 键为哑值）与 bcrypt htpasswd Registry Secret；拒绝为在役 target 重新
+      生成凭据。full 剖面的 Incus 凭据/证书/remote 仍属运维提供，刻意不由 bootstrap 生成；
+- [x] 验收（2026-09-20）：空集群 `kind create` → `make e2e-bootstrap-core` →
+      `BREAKFIX_E2E_PROFILE=core make e2e-prepare` 从零直达 prepared（零母本拷贝），
+      ui 3/3；full 剖面 preflight 对该 target 明确报缺少 incus_endpoint。此欠账源于
+      core 验收时从 full 集群拷贝 Secret 的绕行，CI bootstrap 复用同一入口。
+
 ## 挂起待决策（不排期）
 
 - **内容治理/紧急下架**：场景侧非 authoring 内容无法下架、无管理员覆盖;实践内容
