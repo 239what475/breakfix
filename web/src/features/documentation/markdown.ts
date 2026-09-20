@@ -1,5 +1,4 @@
-import MarkdownIt from "markdown-it";
-import type Token from "markdown-it/lib/token.mjs";
+import MarkdownIt, { type Token } from "markdown-it";
 import {
   createHighlighterCore,
   type HighlighterCore,
