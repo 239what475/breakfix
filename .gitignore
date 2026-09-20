@@ -38,7 +38,7 @@ references/
 .local/
 
 # Node dependencies and test output
-test/node_modules/
+node_modules/
 test/results/
 test/report/
 web/test-results/
