@@ -62,29 +62,35 @@ push 到 main ──→ 快车道（并发取消旧跑）
       gosec、make lint 限定模块真实包；本地 v2.13.2 与 CI 双归零，test-unit 44 包绿；
       CI 首跑即绿（go-test 3m30s、web-test 17s、contracts-build 2m42s）。
 
-### 提交 2 ci: gated nightly with the core regression
+### 提交 2 ci: gated nightly with the core regression ✅ 9ef62bf（调试期修补 7f34284、f39934a、a2016f6）
 
-- [ ] nightly.yml：gate job（API 查上次成功 sha）+ e2e-core（装 kind、建临时集群、
-      bootstrap、core 全量回归、失败上传 .local/e2e 诊断 artifact）+ docs 管线
-      （actions/cache 缓存 .local/docs）+ vk8s；周日 schedule 不带 gate；
-      workflow_dispatch 强制全跑；
-- [ ] 权限最小化（contents: read、actions: read 供 gate 查询）。
+- [x] nightly.yml：gate job（API 查 nightly 上次成功 sha）+ core job（ripgrep、
+      docs-sync/build/fixture、actions/cache 缓存 .local/docs、钉版 kind CLI 与
+      Playwright chromium、清缓存后构建 documentation-library 镜像、空集群
+      bootstrap + core 全量回归、失败上传 .local/e2e 诊断 artifact）+ vk8s job
+      （钉版 kind/vcluster）；周日无条件仅对 schedule 生效，dispatch 走正常 gate，
+      force 输入强制全跑；
+- [x] 权限最小化（contents: read、actions: read 供 gate 查询）；
+- [x] 调试期发现并修复三处：runner 无 ripgrep 且 verify-legacy-removal 在 rg 缺失时
+      空真通过（Makefile 改为缺 rg 即失败，两个 workflow 显式安装）；根清单引用的
+      documentation-library 镜像 ephemeral runner 没有（nightly 从 pinned 站点解析并
+      构建真镜像，prune 顺序前置）；周日豁免误拦 dispatch 的 sha 判断（限 schedule）。
 
-### 提交 3 docs: record the CI tiers and local relevance map
+### 提交 3 docs: record the CI tiers and local relevance map ✅ 9ef62bf
 
-- [ ] docs/operations/testing.md 补"本地只跑最相关测试"的变更区域 → 套件映射
-      （web→vitest+ui；transport/handler→test-unit+admin/documentation；
-      runtime/k8s→k8s；runtime/node→node；scripts/deploy→受影响套件），以及
-      CI 层级（push 快车道 / 按需 nightly / 本地 full / 人工 live）的说明。
+- [x] docs/operations/testing.md 补"CI 与本地的分工"：push 快车道、按需 nightly 的
+      gate 语义、永不进 CI 的边界，以及本地"变更区域 → 最相关测试"映射表。
 
-验收：
+验收（2026-09-20 回填）：
 
-- [x] push 后快车道全绿（首次包含 Vitest 层；2026-09-20 run 35503790139：go-test 3m30s、
+- [x] push 后快车道全绿（首次包含 Vitest 层；run 35503790139：go-test 3m30s、
       web-test 17s、contracts-build 2m42s 含 lint）；
-- [ ] workflow_dispatch 强制 nightly：bootstrap + core 全量回归 + docs + vk8s 在
-      托管 runner 全绿；
-- [ ] gate 语义：同 sha 再次 dispatch 时重 job 被跳过；
-- [ ] make test-unit、verify-generated、web-test-unit 本地绿（不回归）。
+- [x] workflow_dispatch 全量 nightly 在托管 runner 全绿（run 35505673068：core
+      25m14s 含 docs 链 + 库镜像 + core 全量回归，vk8s 1m57s；后随修补两次复跑
+      全绿，末次 24m15s）；
+- [x] gate 语义：同 sha 二次 dispatch，core/vk8s 均 0 秒跳过（run 35508119362）；
+      HEAD 移动与周日无条件分支亦分别实证；
+- [x] make test-unit（44 包）、verify-generated、web-test-unit（20 用例）本地绿。
 
 ## 挂起待决策（不排期）
 
