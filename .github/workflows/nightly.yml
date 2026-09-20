@@ -101,6 +101,8 @@ jobs:
         run: docker image prune -af >/dev/null
       - name: Build the pinned documentation library image
         run: make documentation-library-image
+      - name: Run the documentation semantic checks
+        run: make docs-smoke
       - name: Bootstrap and run the core regression
         env:
           BREAKFIX_E2E_PROFILE: core
