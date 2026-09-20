@@ -90,6 +90,35 @@ smoke，有提交必跑 + 周日兜底），但 manifest 钉死单个 SHA，**�
 - ollama critical 告警无修复版，只能等上游；
 - 首次真实发布后部署侧验证拉取（包 public 化后应无凭证直拉）。
 
+## fixture 退役：文档/admin 套件转 live 验收（当前阶段，2026-09-20 立项）
+
+背景：document-agent-fixture（e2e 内确定性假模型服务）经用户决策退役（2026-09-20，
+"这个设计没有意义"）。理由与代价已向用户说明：其他 agent 套件本就是 live-only 模式，
+文档流水线是唯一进 CI 的 agent 特性；退役后 nightly 不再覆盖文档实践流水线的
+batch/门禁/发布链，该覆盖转由本地 live 验收承担。
+
+- [ ] 删除 fixture 三件套：cmd/document-agent-fixture、build/images/document-agent-fixture、
+      test/kind/document-agent-fixture.yaml + .gitleaks.toml 相关 allowlist；
+- [ ] e2e-documentation-prepare.sh：去掉 fixture 构建/部署与 base_url/model/key 三处
+      补丁；改为前置校验 runtime Secret 携带真实 deepseek key（bootstrap 假值直接
+      拒绝并提示）；库生成/ConfigMap/volume 换源/catalog 等待全部保留；
+- [ ] run-e2e.sh：documentation、admin 套件加 RUN_AGENT_LIVE_E2E=1 门禁（真实模型），
+      不限剖面（k8s 运行时，core target 可跑）；
+- [ ] run-e2e-regression.sh：链回归为标准 prepare + k8s → ui（full 再加 node、
+      recovery），去掉 docs-prepare/admin/reset/documentation 段；
+- [ ] e2e-bootstrap-core.sh 假 deepseek key 注释更新（CI 永不用真实模型）；
+- [ ] testing.md 同步：core 剖面套件列表、回归编排描述、live 验收清单、nightly
+      覆盖边界。
+
+### 验收
+
+- [ ] 本地 full target：RUN_AGENT_LIVE_E2E=1 make test-e2e-documentation 全绿（真实
+      模型驱动 practice 链）；
+- [ ] RUN_AGENT_LIVE_E2E=1 make test-e2e-admin 全绿（真实模型驱动 batch 管理链）；
+- [ ] 回归编排（full 剖面剩余套件）绿；不带门禁变量启动 documentation/admin 被
+      明确拒绝；
+- [ ] 快车道/nightly 配置不引用已删路径，CI 绿。
+
 ## 挂起待决策（不排期）
 
 - **内容治理/紧急下架**：场景侧非 authoring 内容无法下架、无管理员覆盖;实践内容

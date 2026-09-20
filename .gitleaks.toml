@@ -17,8 +17,6 @@ regexes = [
 	'''taxonomy-e2e-(internal-key|jwt-secret)''',
 	'''mcp-e2e-publish''',
 	'''NEWSECRET234567''',
-	'''documentation-fixture-key''',
-	'''unused-until-documentation-prepare''',
 	'''unused-in-core-profile''',
 	'''web/src/api/generated''',
 ]

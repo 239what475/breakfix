@@ -11,7 +11,6 @@ target_script=$repo_root/scripts/kind/e2e-target.sh
 
 fail() { printf 'Breakfix documentation E2E prepare: %s\n' "$*" >&2; exit 1; }
 require_command() { command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"; }
-encode() { printf '%s' "$1" | base64 | tr -d '\n'; }
 
 for tool in base64 curl docker go jq kubectl make sed tr; do require_command "$tool"; done
 [ -f "$docs_fixture_root/build-info.json" ] || fail "docs-project fixture is incomplete; run make docs-fixture"
@@ -36,6 +35,17 @@ stop_port_forward() {
 
 trap stop_port_forward EXIT HUP INT TERM
 
+# The live documentation suites drive the practice pipeline with the real
+# model, so the runtime Secret must already carry a real credential; the
+# core-bootstrap placeholder and an empty value are rejected up front.
+model_key=$(kubectl -n "$namespace" get secret "$runtime_secret" -o json |
+	jq -r '.data.deepseek_api_key // "" | @base64d')
+case "$model_key" in
+	''|unused-in-core-profile|unused-until-documentation-prepare|placeholder-replaced-by-prepare)
+		fail "runtime secret $runtime_secret has no real deepseek_api_key; documentation suites call the real model"
+		;;
+esac
+
 # Prepare the ordinary disposable target first so this suite inherits its
 # isolated database, Registry, Incus projects, and immutable runtime snapshot.
 # The Server rollout is deferred: this script patches documentation config
@@ -43,27 +53,16 @@ trap stop_port_forward EXIT HUP INT TERM
 # fixture Catalog projection wait, and the prepared marker.
 BREAKFIX_E2E_DEFER_SERVER_RESTART=1 make -C "$repo_root" --no-print-directory e2e-prepare
 
-fixture_build_dir=$state_dir/document-agent-fixture-build
-mkdir -p "$fixture_build_dir"
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "$fixture_build_dir/document-agent-fixture" "$repo_root/cmd/document-agent-fixture"
-docker build --platform linux/amd64 --provenance=false -t breakfix/document-agent-fixture:e2e \
-	-f "$repo_root/build/images/document-agent-fixture/Dockerfile" "$fixture_build_dir" >/dev/null
-kind_cluster=${BREAKFIX_E2E_KIND_CLUSTER:-breakfix-e2e}
-kind load docker-image --name "$kind_cluster" breakfix/document-agent-fixture:e2e >/dev/null
 # The verification pods run inside the vcluster environments hosted on the
 # Kind node; landing the small workload image in the node's containerd keeps
 # the first wait short. `kind load` rejects the multi-arch busybox manifest
 # because the local store only holds the host platform, and the node cannot
 # reach docker.io directly - so the host platform blobs travel over through
 # docker save instead.
+kind_cluster=${BREAKFIX_E2E_KIND_CLUSTER:-breakfix-e2e}
 kind_node=${BREAKFIX_E2E_KIND_NODE:-${kind_cluster}-control-plane}
 docker image inspect busybox:1.36.1 >/dev/null 2>&1 || docker pull busybox:1.36.1 >/dev/null
 docker save busybox:1.36.1 | docker exec -i "$kind_node" ctr --namespace=k8s.io images import - >/dev/null
-kubectl -n "$namespace" apply -f "$repo_root/test/kind/document-agent-fixture.yaml" >/dev/null
-# The fixture image is rebuilt under a stable E2E tag. Restart its Deployment
-# so Kubernetes does not keep serving an earlier locally loaded image.
-kubectl -n "$namespace" rollout restart deployment/document-agent-fixture >/dev/null
-kubectl -n "$namespace" rollout status deployment/document-agent-fixture --timeout=2m >/dev/null
 
 # The server consumes a real docs-project library, not a hand-made snapshot:
 # the committed rendered fixture pages are projected by the same generator that
@@ -124,16 +123,9 @@ config_name=$(kubectl -n "$namespace" get deployment breakfix-server -o json |
 config=$(kubectl -n "$namespace" get configmap "$config_name" -o json | jq -r '.data["config.yaml"]')
 [ -n "$config" ] && [ "$config" != "null" ] || fail "config ConfigMap $config_name has no config.yaml"
 config=$(printf '%s\n' "$config" | sed \
-	-e 's#^  library_root: .*#  library_root: /var/lib/breakfix/documentation/library#' \
-	-e 's#base_url: https://api.deepseek.com#base_url: http://document-agent-fixture:8080#' \
-	-e 's#model: deepseek-v4-pro#model: documentation-fixture#')
+	-e 's#^  library_root: .*#  library_root: /var/lib/breakfix/documentation/library#')
 kubectl -n "$namespace" patch configmap "$config_name" --type merge --patch "$(jq -cn --arg config "$config" '{data:{"config.yaml":$config}}')" >/dev/null
 
-# The fixture implements the same authenticated chat-completions wire contract,
-# but does not need a real model credential. The target restore point returns
-# this Secret to its original bytes during reset.
-kubectl -n "$namespace" patch secret "$runtime_secret" --type merge --patch \
-	"$(jq -cn --arg value "documentation-fixture-key" --arg encoded "$(encode documentation-fixture-key)" '{data:{deepseek_api_key:$encoded}}')" >/dev/null
 kubectl -n "$namespace" rollout restart deployment/breakfix-server >/dev/null
 kubectl -n "$namespace" rollout status deployment/breakfix-server --timeout=3m >/dev/null
 

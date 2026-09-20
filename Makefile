@@ -163,6 +163,8 @@ verify-legacy-removal:
 		-e 'PublishOperationsRevision' \
 		-e 'ClaimCatalogRuntimeAction' \
 		-e 'RuntimeAttempt' \
+		-e 'document-agent-fixture' \
+		-e 'documentation-fixture-key' \
 		--glob '!TODO.md' --glob '!Makefile' --glob '!**/node_modules/**' .
 
 test-unit: verify-legacy-removal

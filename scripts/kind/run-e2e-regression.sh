@@ -1,16 +1,14 @@
 #!/bin/sh
 set -eu
 
-# One documentation prepare serves the whole regression chain. Admin runs on
-# the fresh target that prepare creates (its first registration must elect the
-# bootstrap admin); the database-only reset restores the counted state the
-# documentation practice chain asserts; k8s and ui append without another
-# prepare; node and recovery join only under the full profile because their
-# scenarios drive Incus-backed environments.
+# One prepare serves the whole chain; k8s and ui append without another
+# prepare, and node and recovery join only under the full profile because
+# their scenarios drive Incus-backed environments. The documentation and
+# admin suites are live acceptance (real model) and run through their own
+# entry points, not this chain.
 
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-docs_prepare=$repo_root/scripts/kind/e2e-documentation-prepare.sh
-reset_database=$repo_root/scripts/kind/e2e-reset-database.sh
+repo_root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+prepare=$repo_root/scripts/kind/e2e-prepare.sh
 runner=$repo_root/scripts/kind/run-e2e.sh
 profile=${BREAKFIX_E2E_PROFILE:-full}
 
@@ -23,11 +21,8 @@ case "$profile" in
 		;;
 esac
 
-DOCS_PROJECT_VERSION=${DOCS_PROJECT_VERSION:-docs-project-v10} "$docs_prepare"
+"$prepare"
 
-"$runner" admin
-"$reset_database"
-"$runner" documentation
 "$runner" k8s
 "$runner" ui
 if [ "$profile" = full ]; then

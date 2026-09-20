@@ -61,7 +61,7 @@ kubectl -n "$namespace" create secret generic "$runtime_secret" \
 	--from-literal=registry_username="$registry_username" \
 	--from-literal=registry_password="$registry_password" \
 	--from-literal=registry_pull_secret=breakfix-registry-pull \
-	--from-literal=deepseek_api_key=unused-until-documentation-prepare \
+	--from-literal=deepseek_api_key=unused-in-core-profile \
 	--from-literal=opensandbox_api_key=unused-in-core-profile \
 	--from-literal=ui_origin=http://127.0.0.1:9 \
 	--from-literal=catalog_release_reference= \
