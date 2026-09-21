@@ -1675,7 +1675,7 @@ components:
 
     AdminSystemStatus:
       type: object
-      required: [version, commit, build_time, catalog_integrity, services]
+      required: [version, commit, build_time, catalog_integrity, services, playground_max_active]
       properties:
         version:
           type: string
@@ -1690,6 +1690,9 @@ components:
           $ref: "#/components/schemas/AdminCatalogIntegrity"
         documentation:
           $ref: "#/components/schemas/AdminDocumentationDeployment"
+        playground_max_active:
+          type: integer
+          description: Configured site-wide cap on concurrently active playground sessions
         services:
           type: array
           items:

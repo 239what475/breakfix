@@ -563,3 +563,178 @@
 
 
 }
+
+/* Environment observation: overview cards, a phase-filtered table with a
+   stuck heuristic, and the reap queue section. */
+
+.admin-overview {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 10px;
+	margin: 14px 0 18px;
+}
+
+.admin-overview-card {
+	padding: 12px 14px;
+	border: 1px solid #dfe6e2;
+	border-radius: 8px;
+	background: #f7faf8;
+}
+
+.admin-overview-label {
+	margin: 0;
+	color: #6f7c76;
+	font-size: 11px;
+}
+
+.admin-overview-value {
+	margin: 6px 0 0;
+	font: 700 22px "DM Mono", monospace;
+}
+
+.admin-overview-value small {
+	font-weight: 500;
+	color: #8a978f;
+}
+
+.admin-overview-phases {
+	grid-column: span 2;
+}
+
+.admin-phase-chip {
+	display: inline-block;
+	margin: 2px 6px 0 0;
+	padding: 2px 6px;
+	border-radius: 4px;
+	background: #e7ede9;
+	color: #53625b;
+	font: 600 10px "DM Mono", monospace;
+}
+
+.admin-table-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	margin: 10px 0;
+}
+
+.admin-filter {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	color: #6f7c76;
+	font-size: 12px;
+}
+
+.admin-filter select {
+	padding: 4px 8px;
+	border: 1px solid #dfe6e2;
+	border-radius: 6px;
+	background: #fff;
+	font: 12px "DM Mono", monospace;
+}
+
+.admin-table-wrap {
+	overflow-x: auto;
+	border: 1px solid #dfe6e2;
+	border-radius: 8px;
+}
+
+.admin-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 12px;
+}
+
+.admin-table th {
+	padding: 9px 12px;
+	background: #f2f6f3;
+	color: #6f7c76;
+	font: 700 10px "DM Mono", monospace;
+	text-align: left;
+	text-transform: uppercase;
+}
+
+.admin-table td {
+	padding: 9px 12px;
+	border-top: 1px solid #e8eeea;
+	vertical-align: top;
+}
+
+.admin-mono {
+	font: 11px "DM Mono", monospace;
+}
+
+.admin-phase-badge {
+	display: inline-block;
+	padding: 2px 7px;
+	border-radius: 4px;
+	background: #e7ede9;
+	color: #53625b;
+	font: 600 10px "DM Mono", monospace;
+}
+
+.admin-phase-badge[data-phase="Ready"] {
+	background: #e1f0e8;
+	color: #17614e;
+}
+
+.admin-phase-badge[data-phase="Failed"],
+.admin-phase-badge[data-state="failed"],
+.admin-phase-badge[data-state="claimed"] {
+	background: #f7e5e1;
+	color: #8c3a2b;
+}
+
+.admin-phase-badge[data-phase="Draining"] {
+	background: #f4ecd9;
+	color: #7c611c;
+}
+
+.admin-row-stuck td {
+	background: #fdf0ed;
+}
+
+.admin-stuck-flag {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	margin-left: 8px;
+	color: #8c3a2b;
+	font: 600 10px "DM Mono", monospace;
+}
+
+.admin-failure-note {
+	display: block;
+	margin-top: 3px;
+	max-width: 360px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: #8c3a2b;
+	font: 10px "DM Mono", monospace;
+}
+
+.admin-row-actions {
+	white-space: nowrap;
+}
+
+.admin-release-button:not(:disabled) {
+	color: #8c3a2b;
+}
+
+.admin-subsection-title {
+	margin: 26px 0 4px;
+	font-size: 15px;
+}
+
+.admin-subsection-note {
+	margin: 0 0 10px;
+	color: #6f7c76;
+	font-size: 11px;
+}
+
+.admin-reap-table td {
+	font: 11px "DM Mono", monospace;
+}

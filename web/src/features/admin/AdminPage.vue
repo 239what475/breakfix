@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { RefreshCw, ScrollText, ShieldCheck, Users } from "lucide-vue-next";
+import { Boxes, RefreshCw, ScrollText, ShieldCheck, Users } from "lucide-vue-next";
+import AdminEnvironmentsPage from "./AdminEnvironmentsPage.vue";
 import AdminAuditPage from "./AdminAuditPage.vue";
 import AdminUsersPage from "./AdminUsersPage.vue";
 import "./admin.css";
 
-const props = defineProps<{ active: boolean; loggedIn: boolean; section: "users" | "audit" }>();
-const emit = defineEmits<{ navigate: [section: "users" | "audit"] }>();
+type AdminSection = "users" | "audit" | "environments";
+const props = defineProps<{ active: boolean; loggedIn: boolean; section: AdminSection }>();
+const emit = defineEmits<{ navigate: [section: AdminSection] }>();
 
-const tab = ref<"users" | "audit">(props.section);
+const tab = ref<AdminSection>(props.section);
 
 watch(
   () => props.section,
@@ -17,7 +19,7 @@ watch(
   },
 );
 
-const heading = computed(() => ({ users: "账号管理", audit: "人操作审计" })[tab.value]);
+const heading = computed(() => ({ users: "账号管理", audit: "人操作审计", environments: "环境观测" })[tab.value]);
 
 // Users and audit own their fetches; the header refresh nudges them through
 // the same counter pattern AppShell uses for My space.
@@ -39,12 +41,14 @@ function refreshConsole() {
         <nav class="admin-tabs desktop-tabs" aria-label="Admin sections">
           <button :class="{ active: tab === 'users' }" type="button" @click="emit('navigate', 'users')"><Users :size="16" aria-hidden="true" />用户</button>
           <button :class="{ active: tab === 'audit' }" type="button" @click="emit('navigate', 'audit')"><ScrollText :size="16" aria-hidden="true" />审计</button>
+          <button :class="{ active: tab === 'environments' }" type="button" @click="emit('navigate', 'environments')"><Boxes :size="16" aria-hidden="true" />环境</button>
         </nav>
       </aside>
       <main class="admin-content">
         <nav class="admin-tabs mobile-tabs" aria-label="Admin sections">
           <button :class="{ active: tab === 'users' }" type="button" @click="emit('navigate', 'users')">用户</button>
           <button :class="{ active: tab === 'audit' }" type="button" @click="emit('navigate', 'audit')">审计</button>
+          <button :class="{ active: tab === 'environments' }" type="button" @click="emit('navigate', 'environments')">环境</button>
         </nav>
         <header class="admin-content-header">
           <div><p class="eyebrow">Admin console</p><h1>{{ heading }}</h1></div>
@@ -54,6 +58,7 @@ function refreshConsole() {
         </header>
         <AdminUsersPage v-show="tab === 'users'" :active="props.active && tab === 'users'" :logged-in="props.loggedIn" :refresh-request="refreshRequest" />
         <AdminAuditPage v-show="tab === 'audit'" :active="props.active && tab === 'audit'" :logged-in="props.loggedIn" :refresh-request="refreshRequest" />
+        <AdminEnvironmentsPage v-show="tab === 'environments'" :active="props.active && tab === 'environments'" :logged-in="props.loggedIn" :refresh-request="refreshRequest" />
       </main>
     </div>
   </section>

@@ -1,6 +1,6 @@
 import { ref, watch, type Ref } from "vue";
 import { api, isLoggedIn, tokenUserRole } from "../../api/client";
-import type { AdminHumanAction, AdminUser } from "../../api/generated";
+import type { AdminEnvironment, AdminHumanAction, AdminRunnableReap, AdminUser } from "../../api/generated";
 
 // useAdminAuthorization guards the admin surface at the display layer only.
 // The backend independently rejects non-admin calls with 403.
@@ -106,4 +106,83 @@ export function useAdminAudit(active: Ref<boolean>, loggedIn: Ref<boolean>) {
 	}, { immediate: true });
 
 	return { actions, nextCursor, loading, loadingMore, error, actionFilter, userFilter, refresh, loadMore };
+}
+
+// useAdminEnvironments owns the environment observation page: one environment
+// list, the reap queue behind teardown, and the configured playground cap the
+// overview card reads from the system status. The release verb rides the
+// existing drain path and only nudges the controller.
+export function useAdminEnvironments(active: Ref<boolean>, loggedIn: Ref<boolean>) {
+	const environments = ref<AdminEnvironment[]>([]);
+	const reaps = ref<AdminRunnableReap[]>([]);
+	const playgroundMaxActive = ref<number | null>(null);
+	const loading = ref(false);
+	const error = ref("");
+	const releasing = ref("");
+	let request = 0;
+
+	async function refresh() {
+		const ticket = ++request;
+		loading.value = true;
+		error.value = "";
+		try {
+			const [list, reapList, system] = await Promise.all([
+				api.listAdminEnvironments(),
+				api.listAdminRunnableReaps(),
+				api.getAdminSystem(),
+			]);
+			if (ticket !== request) return;
+			environments.value = list.environments;
+			reaps.value = reapList.reaps;
+			playgroundMaxActive.value = system.playground_max_active;
+		} catch (cause) {
+			if (ticket !== request) return;
+			error.value = cause instanceof Error ? cause.message : "Unable to load environments";
+		} finally {
+			if (ticket === request) loading.value = false;
+		}
+	}
+
+	async function release(name: string) {
+		releasing.value = name;
+		error.value = "";
+		try {
+			await api.releaseAdminEnvironment(name);
+		} catch (cause) {
+			error.value = cause instanceof Error ? cause.message : "Unable to request the release";
+			return false;
+		} finally {
+			releasing.value = "";
+		}
+		await refresh();
+		return true;
+	}
+
+	watch([active, loggedIn], ([activeNow, loggedInNow]) => {
+		if (activeNow && loggedInNow) void refresh();
+	}, { immediate: true });
+
+	return { environments, reaps, playgroundMaxActive, loading, error, releasing, refresh, release };
+}
+
+// A Draining or Failed environment whose reference timestamp (failure time,
+// else the expired deadline, else creation) is older than ten minutes is
+// flagged as stuck. It is a pure UI heuristic: no alerting and no automatic
+// action — the operator decides, and disposal still goes through the audited
+// release path.
+export const stuckThresholdMs = 10 * 60 * 1000;
+
+export function isStuckEnvironment(environment: AdminEnvironment, now = Date.now()) {
+	if (environment.phase !== "Draining" && environment.phase !== "Failed") return false;
+	let reference: string;
+	if (environment.phase === "Failed" && environment.failure) {
+		reference = environment.failure.at;
+	} else if (environment.expires_at && new Date(environment.expires_at).getTime() <= now) {
+		// Draining usually starts at the deadline; before any deadline exists,
+		// creation time is the only lower bound (an overestimate).
+		reference = environment.expires_at;
+	} else {
+		reference = environment.created_at;
+	}
+	return now - new Date(reference).getTime() > stuckThresholdMs;
 }

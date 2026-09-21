@@ -30,6 +30,7 @@ function mountShell() {
 describe("AppShell playground gate", () => {
 	afterEach(() => {
 		localStorage.removeItem("token");
+		window.history.pushState({}, "", "/");
 		vi.clearAllMocks();
 	});
 
@@ -49,5 +50,44 @@ describe("AppShell playground gate", () => {
 
 		expect(wrapper.find(".playground-fab").exists()).toBe(true);
 		expect(api.getPlayground).toHaveBeenCalledTimes(1);
+	});
+});
+
+// A JWT-shaped token whose payload carries the role claim; the shell reads
+// the claim locally to gate the admin surface display.
+function tokenWithRole(role: string) {
+	const payload = btoa(JSON.stringify({ role })).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+	return `header.${payload}.signature`;
+}
+
+describe("AppShell admin gate", () => {
+	afterEach(() => {
+		localStorage.removeItem("token");
+		window.history.pushState({}, "", "/");
+		vi.clearAllMocks();
+	});
+
+	it("never renders the console for an anonymous or non-admin visitor", async () => {
+		window.history.pushState({}, "", "/admin/environments");
+		const anonymous = mountShell();
+		await flushPromises();
+		expect(anonymous.findComponent({ name: "AdminPage" }).exists()).toBe(false);
+
+		localStorage.setItem("token", tokenWithRole("user"));
+		const member = mountShell();
+		await flushPromises();
+		expect(member.findComponent({ name: "AdminPage" }).exists()).toBe(false);
+	});
+
+	it("renders the console for an admin on any admin section path", async () => {
+		vi.mocked(api.getPlayground).mockResolvedValue({ state: "none" });
+		localStorage.setItem("token", tokenWithRole("admin"));
+		window.history.pushState({}, "", "/admin/environments");
+		const wrapper = mountShell();
+		await flushPromises();
+
+		const console = wrapper.findComponent({ name: "AdminPage" });
+		expect(console.exists()).toBe(true);
+		expect(console.props("section")).toBe("environments");
 	});
 });

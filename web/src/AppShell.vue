@@ -20,10 +20,10 @@ const authOpen = ref(false);
 const authMode = ref<"login" | "register">("login");
 const authoringOpen = ref(false);
 const authoringSessionId = ref<string>();
-type AdminSection = "users" | "audit";
+type AdminSection = "users" | "audit" | "environments";
 
 function adminSectionFromPath(): AdminSection {
-	const match = window.location.pathname.match(/^\/admin\/(users|audit)$/);
+	const match = window.location.pathname.match(/^\/admin\/(users|audit|environments)$/);
 	return (match?.[1] as AdminSection) ?? "users";
 }
 

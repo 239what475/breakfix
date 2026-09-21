@@ -27,6 +27,9 @@ func (h *Handler) GetAdminSystem(c *gin.Context) {
 		Commit:    report.Commit,
 		BuildTime: report.BuildTime,
 		Services:  make([]api.AdminBackgroundService, 0, len(report.Services)),
+		// The fleet cap is process configuration, not bootstrap-assembled
+		// state, so the environment observation page reads it from here.
+		PlaygroundMaxActive: h.playgroundMaxActive,
 	}
 	if report.CatalogReleaseReference != "" {
 		status.CatalogReleaseReference = &report.CatalogReleaseReference

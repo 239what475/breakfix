@@ -245,6 +245,10 @@ export type AdminSystemStatus = {
     catalog_release_reference?: string | null;
     catalog_integrity: AdminCatalogIntegrity;
     documentation?: AdminDocumentationDeployment;
+    /**
+     * Configured site-wide cap on concurrently active playground sessions
+     */
+    playground_max_active: number;
     services: Array<AdminBackgroundService>;
 };
 

@@ -235,6 +235,9 @@ func TestAdminSystemEndpointReportsBuildAndServices(t *testing.T) {
 	if status.Version != "test-version" || status.Commit != "test-commit" || status.CatalogReleaseReference == nil {
 		t.Fatalf("system build section = %#v", status)
 	}
+	if status.PlaygroundMaxActive != 10 {
+		t.Fatalf("playground cap = %d, want the default 10", status.PlaygroundMaxActive)
+	}
 	if status.CatalogIntegrity.State != "ok" {
 		t.Fatalf("catalog integrity = %#v", status.CatalogIntegrity)
 	}

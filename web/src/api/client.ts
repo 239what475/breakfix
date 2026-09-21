@@ -28,6 +28,10 @@ import type {
 	TerminalTicketResponse,
 	AdminAuditPage,
 	AdminUserList,
+	AdminEnvironmentList,
+	AdminEnvironmentRelease,
+	AdminRunnableReapList,
+	AdminSystemStatus,
 } from "./generated";
 
 export type MySpaceLearningQuery = NonNullable<GetMySpaceLearningData["query"]>;
@@ -315,5 +319,10 @@ export const api = {
 		if (user_id) query.set("user_id", user_id);
 		return request<AdminAuditPage>("GET", `/admin/audit?${query.toString()}`);
 	},
+	getAdminSystem: () => request<AdminSystemStatus>("GET", "/admin/system"),
+	listAdminEnvironments: () => request<AdminEnvironmentList>("GET", "/admin/environments"),
+	releaseAdminEnvironment: (name: string) =>
+		request<AdminEnvironmentRelease>("POST", `/admin/environments/${encodeURIComponent(name)}/release`),
+	listAdminRunnableReaps: () => request<AdminRunnableReapList>("GET", "/admin/runnable-reaps"),
 
 };

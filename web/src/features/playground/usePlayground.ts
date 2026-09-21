@@ -102,7 +102,15 @@ export function usePlayground(notify: Notify) {
     } catch (error) {
       if (epoch !== pollEpoch) return;
       stopPolling();
-      notify(errorMessage(error, "Unable to start the playground."), "error");
+      // The capacity gate answers 429 with a stable message; everything else
+      // surfaces verbatim. The button stays retryable either way.
+      const message = errorMessage(error, "Unable to start the playground.");
+      notify(
+        message.includes("at capacity")
+          ? "The playground is at capacity. Try again once another session closes."
+          : message,
+        "error",
+      );
     } finally {
       starting.value = false;
     }
