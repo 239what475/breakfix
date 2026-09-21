@@ -19,17 +19,34 @@ import (
 // reuses the same ticket storage; the practice identifier rides the generic
 // content column.
 func (h *Handler) CreatePracticeTerminalTicket(c *gin.Context) {
+	target, ok := h.resolvePracticeTarget(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	h.createContentTerminalTicket(c, target, c.Param("id"))
+}
+
+// HandlePracticeTerminalTicket upgrades the one-time ticket to a terminal
+// WebSocket with the same origin allowlist, resize/data/ready protocol, and
+// connection-scoped lease renewal as the operations terminal.
+func (h *Handler) HandlePracticeTerminalTicket(c *gin.Context) {
+	target, ok := h.resolvePracticeTarget(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	h.handleContentTerminalTicket(c, target, c.Param("id"))
+}
+
+// createContentTerminalTicket mints the one-time ticket for whichever content
+// target owns the environment: a published practice or the reader's blank
+// documentation scenario.
+func (h *Handler) createContentTerminalTicket(c *gin.Context, target environmentContentTarget, contentID string) {
 	user := h.requireUser(c)
 	if user == nil {
 		return
 	}
 	if h.db == nil || h.k8s == nil {
 		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "terminal dependencies are not configured"})
-		return
-	}
-	practiceID := c.Param("id")
-	target, ok := h.resolvePracticeTarget(c, practiceID)
-	if !ok {
 		return
 	}
 	var request api.TerminalTicketRequest
@@ -45,7 +62,7 @@ func (h *Handler) CreatePracticeTerminalTicket(c *gin.Context) {
 	env, err := h.findEnvironment(c.Request.Context(), user.ID, target)
 	if err != nil || env == nil || env.UID == "" || !terminalEnvironmentReady(env, h.nodeTerminal) {
 		if err == nil || errors.Is(err, errNoMatchingEnvironment) {
-			c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this practice"})
+			c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this content"})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("find environment: %v", err)})
@@ -66,7 +83,7 @@ func (h *Handler) CreatePracticeTerminalTicket(c *gin.Context) {
 		TokenHash:      terminalTicketHash(ticket),
 		UserID:         user.ID,
 		EnvironmentUID: env.UID,
-		ScenarioID:     practiceID,
+		ScenarioID:     contentID,
 		NodeName:       nodeName,
 		WindowName:     windowName,
 		ExpiresAt:      now.Add(terminalTicketTTL),
@@ -77,11 +94,11 @@ func (h *Handler) CreatePracticeTerminalTicket(c *gin.Context) {
 	c.JSON(http.StatusOK, api.TerminalTicketResponse{Ticket: ticket})
 }
 
-// HandlePracticeTerminalTicket upgrades the one-time ticket to a terminal
-// WebSocket with the same origin allowlist, resize/data/ready protocol, and
-// connection-scoped lease renewal as the operations terminal.
-func (h *Handler) HandlePracticeTerminalTicket(c *gin.Context) {
-	practiceID := c.Param("id")
+// handleContentTerminalTicket upgrades the one-time ticket to a terminal
+// WebSocket for the content that minted it, with the same origin allowlist,
+// resize/data/ready protocol, and connection-scoped lease renewal as the
+// operations terminal.
+func (h *Handler) handleContentTerminalTicket(c *gin.Context, target environmentContentTarget, contentID string) {
 	if h.db == nil || h.k8s == nil {
 		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "terminal dependencies are not configured"})
 		return
@@ -90,21 +107,17 @@ func (h *Handler) HandlePracticeTerminalTicket(c *gin.Context) {
 		c.JSON(http.StatusForbidden, api.ErrorResponse{Error: "terminal origin is not allowed"})
 		return
 	}
-	target, ok := h.resolvePracticeTarget(c, practiceID)
-	if !ok {
-		return
-	}
-	ticket, err := h.db.Environment.ClaimTerminalTicket(c.Request.Context(), terminalTicketHash(c.Query("ticket")), practiceID, c.Query("window"), time.Now().UTC())
+	ticket, err := h.db.Environment.ClaimTerminalTicket(c.Request.Context(), terminalTicketHash(c.Query("ticket")), contentID, c.Query("window"), time.Now().UTC())
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, api.ErrorResponse{Error: "terminal ticket is invalid or expired"})
 		return
 	}
 	env, err := h.findActiveEnvironmentByUID(c.Request.Context(), ticket.UserID, ticket.EnvironmentUID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this practice"})
+		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this content"})
 		return
 	}
-	if env.UID != ticket.EnvironmentUID || env.ScenarioRef != practiceID || env.SourceRevision != target.revisionID {
+	if env.UID != ticket.EnvironmentUID || env.ScenarioRef != contentID || env.SourceRevision != target.revisionID {
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "terminal environment has changed"})
 		return
 	}
@@ -137,7 +150,7 @@ func (h *Handler) HandlePracticeTerminalTicket(c *gin.Context) {
 		return
 	}
 
-	slog.Info("terminal session started", "practice", practiceID, "user", ticket.UserID)
+	slog.Info("terminal session started", "content", contentID, "user", ticket.UserID)
 	key := env.Runtime + "/" + env.Name
 	wsUpgrade(c.Writer, c.Request, h.uiOrigin, env, runtimeAdapter, h.cooldownMin, stream, terminalSocketLifecycle{
 		open: func() error {
@@ -145,7 +158,7 @@ func (h *Handler) HandlePracticeTerminalTicket(c *gin.Context) {
 				ID:               connectionID,
 				EnvironmentUID:   env.UID,
 				UserID:           ticket.UserID,
-				ScenarioID:       practiceID,
+				ScenarioID:       contentID,
 				ServerInstanceID: h.serverInstance,
 				ConnectedAt:      time.Now().UTC(),
 			}); err != nil {

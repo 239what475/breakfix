@@ -160,6 +160,14 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	documentationRoutes.POST("/practices/:id/stop", h.StopDocumentationPracticeEnvironment)
 	documentationRoutes.POST("/practices/:id/reset", h.ResetDocumentationPracticeEnvironment)
 	documentationRoutes.POST("/practices/:id/terminal-ticket", h.CreatePracticeTerminalTicket)
+	// The blank practice scenario is a per-user session verb scoped to the
+	// pinned library: one environment per user, carried across every page.
+	documentationRoutes.GET("/scenario", h.GetDocumentationScenario)
+	documentationRoutes.POST("/scenario", h.StartDocumentationScenario)
+	documentationRoutes.POST("/scenario/reset", h.ResetDocumentationScenario)
+	documentationRoutes.DELETE("/scenario", h.StopDocumentationScenario)
+	documentationRoutes.POST("/scenario/terminal-ticket", h.CreateBlankScenarioTerminalTicket)
+	router.GET("/api/documentation/scenario/terminal", h.HandleBlankScenarioTerminalTicket)
 	// The terminal WebSocket authenticates with the one-time ticket instead of
 	// the JWT, exactly like the operations terminal.
 	router.GET("/api/documentation/practices/:id/terminal", h.HandlePracticeTerminalTicket)

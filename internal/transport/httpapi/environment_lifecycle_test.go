@@ -110,9 +110,15 @@ func (s *environmentAPITestState) serveCollection(w http.ResponseWriter, r *http
 		}
 		s.createSuccesses++
 		environment.UID = types.UID(fmt.Sprintf("environment-%d", s.createSuccesses))
-		environment.Status = runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhaseReady, Runtime: runtimev2.RuntimeStatus{
-			Provider: "node", ResourceRefs: []runtimev2.ResourceReference{{Provider: "incus", Kind: "project", ID: "project"}, {Provider: "incus", Kind: "network", ID: "network"}, {Provider: "incus", Kind: "acl", ID: "acl"}, {Provider: "incus", Kind: "profile", ID: "profile"}, {Provider: "incus", Kind: "instance:host", ID: "host"}},
-		}}
+		// Blank environments start Pending under the k8s provider; the
+		// controller reconciles them to Ready, mirroring the real cluster.
+		if environment.Spec.BlankRuntime != nil {
+			environment.Status = runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhasePending, Runtime: runtimev2.RuntimeStatus{Provider: "k8s"}}
+		} else {
+			environment.Status = runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhaseReady, Runtime: runtimev2.RuntimeStatus{
+				Provider: "node", ResourceRefs: []runtimev2.ResourceReference{{Provider: "incus", Kind: "project", ID: "project"}, {Provider: "incus", Kind: "network", ID: "network"}, {Provider: "incus", Kind: "acl", ID: "acl"}, {Provider: "incus", Kind: "profile", ID: "profile"}, {Provider: "incus", Kind: "instance:host", ID: "host"}},
+			}}
+		}
 		s.environments[environment.Name] = environment
 		created := environment.DeepCopy()
 		s.lastCreated = created

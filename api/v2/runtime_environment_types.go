@@ -50,18 +50,34 @@ type LeaseSpec struct {
 
 // RuntimeEnvironmentSpec contains only Server-owned controls. Runtime
 // profile, artifact, plan, and lifecycle policy are dereferenced from the
-// immutable RunnableRevision and never copied into the CRD.
+// immutable RunnableRevision and never copied into the CRD; a blank
+// environment names no revision and the Controller resolves its installed
+// runtime definition from configuration instead.
 // +kubebuilder:validation:XValidation:rule="oldSelf == null || self.runnableRevisionRef == oldSelf.runnableRevisionRef",message="runnableRevisionRef is immutable"
+// +kubebuilder:validation:XValidation:rule="oldSelf == null || self.blankRuntime == oldSelf.blankRuntime",message="blankRuntime is immutable"
+// +kubebuilder:validation:XValidation:rule="!has(self.blankRuntime) || (self.runnableRevisionRef.id == ” && self.runnableRevisionRef.digest == ”)",message="blankRuntime excludes runnableRevisionRef"
+// +kubebuilder:validation:XValidation:rule="has(self.blankRuntime) || (self.runnableRevisionRef.id != ” && self.runnableRevisionRef.digest != ”)",message="runnableRevisionRef requires id and digest when blankRuntime is absent"
 // +kubebuilder:validation:XValidation:rule="oldSelf == null || self.purpose == oldSelf.purpose",message="purpose is immutable"
 // +kubebuilder:validation:XValidation:rule="oldSelf == null || !has(oldSelf.resetNonce) || (has(self.resetNonce) && self.resetNonce >= oldSelf.resetNonce)",message="resetNonce must be monotonic"
 type RuntimeEnvironmentSpec struct {
-	RunnableRevisionRef RunnableRevisionReference `json:"runnableRevisionRef"`
+	// +optional
+	RunnableRevisionRef RunnableRevisionReference `json:"runnableRevisionRef,omitempty"`
+	// +optional
+	BlankRuntime *BlankRuntimeSpec `json:"blankRuntime,omitempty"`
 	// +kubebuilder:validation:Enum=learning;verification
 	Purpose EnvironmentPurpose `json:"purpose"`
 	Lease   LeaseSpec          `json:"lease"`
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	ResetNonce int64 `json:"resetNonce,omitempty"`
+}
+
+// BlankRuntimeSpec selects a system blank runtime in place of a runnable
+// revision. A blank environment exists for free-form hands-on practice: it
+// provisions the installed runtime with no content, artifact, or plan.
+type BlankRuntimeSpec struct {
+	// +kubebuilder:validation:Enum=k8s
+	Provider string `json:"provider"`
 }
 
 type ResourceReference struct {

@@ -23,10 +23,66 @@ const (
 	DecisionReap      Decision = "reap"
 )
 
-func ValidateSpec(environment runtimev2.RuntimeEnvironment, revision runnable.RunnableRevision) error {
-	ref := environment.Spec.RunnableRevisionRef
-	if strings.TrimSpace(ref.ID) == "" || !runnable.ValidDigest(ref.Digest) {
-		return errors.New("runtime environment has an invalid runnable revision reference")
+// Plan is the resolved runtime definition for one environment. Content-bound
+// environments carry a complete immutable runnable revision; blank
+// environments carry the controller-installed plan and never a revision.
+type Plan struct {
+	Revision runnable.RunnableRevision
+	Blank    *runnable.BlankRuntimePlan
+}
+
+// Profile is the runtime profile either plan arm freezes.
+func (p Plan) Profile() runnable.RuntimeProfile {
+	if p.Blank != nil {
+		return p.Blank.Profile
+	}
+	return p.Revision.Spec.RuntimeProfile
+}
+
+// Lifecycle is the lifecycle policy either plan arm freezes.
+func (p Plan) Lifecycle() runnable.LifecyclePolicy {
+	if p.Blank != nil {
+		return p.Blank.Lifecycle
+	}
+	return p.Revision.Spec.LifecyclePolicy
+}
+
+// Runtime is the provider runtime either plan arm selects.
+func (p Plan) Runtime() runnable.Runtime {
+	return p.Profile().Runtime
+}
+
+// Digest is the revision fence for either plan arm.
+func (p Plan) Digest() (string, error) {
+	if p.Blank != nil {
+		return p.Blank.Digest()
+	}
+	return p.Revision.Digest()
+}
+
+func ValidateSpec(environment runtimev2.RuntimeEnvironment, plan Plan) error {
+	if plan.Blank == nil {
+		ref := environment.Spec.RunnableRevisionRef
+		if strings.TrimSpace(ref.ID) == "" || !runnable.ValidDigest(ref.Digest) {
+			return errors.New("runtime environment has an invalid runnable revision reference")
+		}
+		if err := plan.Revision.Validate(); err != nil {
+			return fmt.Errorf("runtime environment runnable revision: %w", err)
+		}
+		digest, err := plan.Revision.Digest()
+		if err != nil {
+			return err
+		}
+		if ref.Digest != digest {
+			return errors.New("runtime environment reference does not match runnable revision")
+		}
+	} else {
+		if environment.Spec.BlankRuntime == nil || environment.Spec.BlankRuntime.Provider != string(plan.Runtime()) {
+			return errors.New("runtime environment blank runtime does not match the installed plan")
+		}
+		if err := plan.Blank.Validate(); err != nil {
+			return fmt.Errorf("runtime environment blank runtime plan: %w", err)
+		}
 	}
 	if environment.Spec.Purpose != runtimev2.PurposeLearning && environment.Spec.Purpose != runtimev2.PurposeVerification {
 		return errors.New("runtime environment has an invalid purpose")
@@ -37,17 +93,7 @@ func ValidateSpec(environment runtimev2.RuntimeEnvironment, revision runnable.Ru
 	if environment.Spec.Lease.ReleaseAt != nil && environment.Spec.Lease.ReleaseAt.IsZero() {
 		return errors.New("runtime environment has an invalid release time")
 	}
-	if err := revision.Validate(); err != nil {
-		return fmt.Errorf("runtime environment runnable revision: %w", err)
-	}
-	digest, err := revision.Digest()
-	if err != nil {
-		return err
-	}
-	if ref.Digest != digest {
-		return errors.New("runtime environment reference does not match runnable revision")
-	}
-	profileDigest, err := revision.Spec.RuntimeProfile.Digest()
+	profileDigest, err := plan.Profile().Digest()
 	if err != nil {
 		return err
 	}
@@ -80,11 +126,11 @@ func ExpiresAt(createdAt time.Time, lease runtimev2.LeaseSpec, policy runnable.L
 	return expires, nil
 }
 
-func Decide(environment runtimev2.RuntimeEnvironment, revision runnable.RunnableRevision, now time.Time, observedResetNonce int64) (Decision, error) {
-	if err := ValidateSpec(environment, revision); err != nil {
+func Decide(environment runtimev2.RuntimeEnvironment, plan Plan, now time.Time, observedResetNonce int64) (Decision, error) {
+	if err := ValidateSpec(environment, plan); err != nil {
 		return DecisionNone, err
 	}
-	expiresAt, err := ExpiresAt(environment.CreationTimestamp.Time, environment.Spec.Lease, revision.Spec.LifecyclePolicy)
+	expiresAt, err := ExpiresAt(environment.CreationTimestamp.Time, environment.Spec.Lease, plan.Lifecycle())
 	if err != nil {
 		return DecisionNone, err
 	}

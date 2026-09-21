@@ -116,6 +116,25 @@ export type DocumentationPracticeResetResponse = {
     reset_nonce: number;
 };
 
+export type DocumentationScenarioEnvironment = {
+    /**
+     * Session state; lifecycle reclamation reads as none
+     */
+    state: 'none' | 'creating' | 'ready' | 'failed';
+    /**
+     * Environment UID once a session exists
+     */
+    environment_id?: string;
+    /**
+     * Runtime kind, for example k8s
+     */
+    runtime?: string;
+};
+
+export type DocumentationScenarioCloseResponse = {
+    closed: boolean;
+};
+
 export type DocumentationPracticeDetail = {
     id: string;
     title: string;
@@ -1349,6 +1368,139 @@ export type CreatePracticeTerminalTicketResponses = {
 };
 
 export type CreatePracticeTerminalTicketResponse = CreatePracticeTerminalTicketResponses[keyof CreatePracticeTerminalTicketResponses];
+
+export type CloseDocumentationScenarioData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/documentation/scenario';
+};
+
+export type CloseDocumentationScenarioErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+};
+
+export type CloseDocumentationScenarioError = CloseDocumentationScenarioErrors[keyof CloseDocumentationScenarioErrors];
+
+export type CloseDocumentationScenarioResponses = {
+    /**
+     * Session closed
+     */
+    200: DocumentationScenarioCloseResponse;
+};
+
+export type CloseDocumentationScenarioResponse = CloseDocumentationScenarioResponses[keyof CloseDocumentationScenarioResponses];
+
+export type GetDocumentationScenarioData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/documentation/scenario';
+};
+
+export type GetDocumentationScenarioErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+};
+
+export type GetDocumentationScenarioError = GetDocumentationScenarioErrors[keyof GetDocumentationScenarioErrors];
+
+export type GetDocumentationScenarioResponses = {
+    /**
+     * Current session state; state is none when no environment exists
+     */
+    200: DocumentationScenarioEnvironment;
+};
+
+export type GetDocumentationScenarioResponse = GetDocumentationScenarioResponses[keyof GetDocumentationScenarioResponses];
+
+export type CreateDocumentationScenarioData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/documentation/scenario';
+};
+
+export type CreateDocumentationScenarioErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+};
+
+export type CreateDocumentationScenarioError = CreateDocumentationScenarioErrors[keyof CreateDocumentationScenarioErrors];
+
+export type CreateDocumentationScenarioResponses = {
+    /**
+     * Session state after creation or adoption
+     */
+    200: DocumentationScenarioEnvironment;
+};
+
+export type CreateDocumentationScenarioResponse = CreateDocumentationScenarioResponses[keyof CreateDocumentationScenarioResponses];
+
+export type ResetDocumentationScenarioData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/documentation/scenario/reset';
+};
+
+export type ResetDocumentationScenarioErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    409: ErrorResponse;
+};
+
+export type ResetDocumentationScenarioError = ResetDocumentationScenarioErrors[keyof ResetDocumentationScenarioErrors];
+
+export type ResetDocumentationScenarioResponses = {
+    /**
+     * Reset requested; the session returns to creating
+     */
+    200: DocumentationScenarioEnvironment;
+};
+
+export type ResetDocumentationScenarioResponse = ResetDocumentationScenarioResponses[keyof ResetDocumentationScenarioResponses];
+
+export type CreateBlankScenarioTerminalTicketData = {
+    body: TerminalTicketRequest;
+    path?: never;
+    query?: never;
+    url: '/documentation/scenario/terminal-ticket';
+};
+
+export type CreateBlankScenarioTerminalTicketErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type CreateBlankScenarioTerminalTicketError = CreateBlankScenarioTerminalTicketErrors[keyof CreateBlankScenarioTerminalTicketErrors];
+
+export type CreateBlankScenarioTerminalTicketResponses = {
+    /**
+     * Short-lived one-time terminal ticket
+     */
+    200: TerminalTicketResponse;
+};
+
+export type CreateBlankScenarioTerminalTicketResponse = CreateBlankScenarioTerminalTicketResponses[keyof CreateBlankScenarioTerminalTicketResponses];
 
 export type RegisterData = {
     body: RegisterRequest;

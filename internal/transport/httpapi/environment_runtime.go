@@ -77,21 +77,28 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 		return value, nil
 	}
 	adapter.create = func(ctx context.Context, user *postgres.User, target environmentContentTarget) (string, error) {
-		if target.resolveBinding == nil || user == nil {
+		if user == nil {
 			return "", fmt.Errorf("runnable revision store is unavailable")
-		}
-		reference, err := target.resolveBinding(ctx)
-		if err != nil {
-			return "", fmt.Errorf("resolve runnable revision for environment: %w", err)
 		}
 		name := learningEnvironmentName(user.ID, target)
 		now := metav1.NewTime(time.Now().UTC().Truncate(time.Second))
 		environment := &runtimev2.RuntimeEnvironment{
 			ObjectMeta: environmentObjectMeta(name, h.crdNamespace, user.ID, target.kind, target.id, target.revisionID, runtimev2.PurposeLearning),
 			Spec: runtimev2.RuntimeEnvironmentSpec{
-				RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: reference.ID, Digest: reference.Digest},
-				Purpose:             runtimev2.PurposeLearning, Lease: runtimev2.LeaseSpec{RenewedAt: now},
+				Purpose: runtimev2.PurposeLearning, Lease: runtimev2.LeaseSpec{RenewedAt: now},
 			},
+		}
+		if target.blank {
+			environment.Spec.BlankRuntime = &runtimev2.BlankRuntimeSpec{Provider: scenario.NormalizeRuntime(target.runtime)}
+		} else {
+			if target.resolveBinding == nil {
+				return "", fmt.Errorf("runnable revision store is unavailable")
+			}
+			reference, err := target.resolveBinding(ctx)
+			if err != nil {
+				return "", fmt.Errorf("resolve runnable revision for environment: %w", err)
+			}
+			environment.Spec.RunnableRevisionRef = runtimev2.RunnableRevisionReference{ID: reference.ID, Digest: reference.Digest}
 		}
 		if _, err := h.k8s.CreateRuntimeEnvironment(ctx, h.crdNamespace, environment); err != nil {
 			return "", fmt.Errorf("create runtime environment: %w", err)

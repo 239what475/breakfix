@@ -67,10 +67,12 @@ func NewEnvironmentProvider(node NodeEnvironmentProvider, k8s K8sEnvironmentProv
 }
 
 func (p *EnvironmentProvider) Provision(ctx context.Context, binding runtimeenvironment.Binding) (runtimeenvironment.Observation, error) {
-	if err := binding.RunnableRevision.Validate(); err != nil {
-		return runtimeenvironment.Observation{}, runnable.NewArtifactFailure("runnable-revision-invalid", err.Error())
+	if binding.BlankRuntime == nil {
+		if err := binding.RunnableRevision.Validate(); err != nil {
+			return runtimeenvironment.Observation{}, runnable.NewArtifactFailure("runnable-revision-invalid", err.Error())
+		}
 	}
-	switch binding.RunnableRevision.Spec.RuntimeProfile.Runtime {
+	switch p.bindingRuntime(binding) {
 	case runnable.RuntimeNode:
 		return p.provisionNode(ctx, binding)
 	case runnable.RuntimeK8s:
@@ -84,7 +86,7 @@ func (p *EnvironmentProvider) Provision(ctx context.Context, binding runtimeenvi
 // recreates it from the same immutable artifact. A K8s namespace may be
 // asynchronous to delete, in which case the Controller will retry Reset.
 func (p *EnvironmentProvider) Reset(ctx context.Context, binding runtimeenvironment.Binding) (runtimeenvironment.Observation, error) {
-	switch binding.RunnableRevision.Spec.RuntimeProfile.Runtime {
+	switch p.bindingRuntime(binding) {
 	case runnable.RuntimeNode:
 		request, err := p.nodeRequest(binding)
 		if err != nil {
@@ -118,14 +120,16 @@ func (p *EnvironmentProvider) Reset(ctx context.Context, binding runtimeenvironm
 // Stop is deliberately idempotent. These isolated resource types have no
 // separate durable stop state; Release below is the authoritative teardown.
 func (p *EnvironmentProvider) Stop(_ context.Context, binding runtimeenvironment.Binding) (bool, error) {
-	if err := binding.RunnableRevision.Validate(); err != nil {
-		return false, runnable.NewArtifactFailure("runnable-revision-invalid", err.Error())
+	if binding.BlankRuntime == nil {
+		if err := binding.RunnableRevision.Validate(); err != nil {
+			return false, runnable.NewArtifactFailure("runnable-revision-invalid", err.Error())
+		}
 	}
 	return true, nil
 }
 
 func (p *EnvironmentProvider) Release(ctx context.Context, binding runtimeenvironment.Binding) (bool, error) {
-	switch binding.RunnableRevision.Spec.RuntimeProfile.Runtime {
+	switch p.bindingRuntime(binding) {
 	case runnable.RuntimeNode:
 		request, err := p.nodeRequest(binding)
 		if err != nil {
@@ -139,7 +143,7 @@ func (p *EnvironmentProvider) Release(ctx context.Context, binding runtimeenviro
 		}
 		return true, nil
 	case runnable.RuntimeK8s:
-		request, err := p.k8sRequest(binding)
+		request, err := p.k8sReleaseRequest(binding)
 		if err != nil {
 			return false, err
 		}
@@ -151,6 +155,13 @@ func (p *EnvironmentProvider) Release(ctx context.Context, binding runtimeenviro
 	default:
 		return false, runnable.NewArtifactFailure("runtime-unsupported", "runnable runtime is unsupported")
 	}
+}
+
+func (p *EnvironmentProvider) bindingRuntime(binding runtimeenvironment.Binding) runnable.Runtime {
+	if binding.BlankRuntime != nil {
+		return binding.BlankRuntime.Profile.Runtime
+	}
+	return binding.RunnableRevision.Spec.RuntimeProfile.Runtime
 }
 
 func (p *EnvironmentProvider) provisionNode(ctx context.Context, binding runtimeenvironment.Binding) (runtimeenvironment.Observation, error) {
@@ -226,6 +237,9 @@ func (p *EnvironmentProvider) nodeRequest(binding runtimeenvironment.Binding) (i
 }
 
 func (p *EnvironmentProvider) k8sRequest(binding runtimeenvironment.Binding) (environment.VK8sProvisionRequest, error) {
+	if binding.BlankRuntime != nil {
+		return p.blankK8sRequest(binding)
+	}
 	revision := binding.RunnableRevision
 	profile := revision.Spec.RuntimeProfile
 	if profile.Runtime != runnable.RuntimeK8s || profile.ProfileRevision != p.config.K8s.ProfileRevision {
@@ -249,6 +263,52 @@ func (p *EnvironmentProvider) k8sRequest(binding runtimeenvironment.Binding) (en
 		return environment.VK8sProvisionRequest{}, err
 	}
 	return environment.VK8sProvisionRequest{EnvironmentUID: binding.UID, Revision: revisionDigest, Purpose: purpose, Identity: identity, Runtime: runtime}, nil
+}
+
+// blankK8sRequest freezes the blank terminal runtime from the installed plan:
+// the plan's image replaces the runnable artifact reference and the request is
+// marked blank so the provider provisions the terminal without content.
+func (p *EnvironmentProvider) blankK8sRequest(binding runtimeenvironment.Binding) (environment.VK8sProvisionRequest, error) {
+	plan := binding.BlankRuntime
+	if err := plan.Validate(); err != nil {
+		return environment.VK8sProvisionRequest{}, runnable.NewArtifactFailure("blank-plan-invalid", err.Error())
+	}
+	if plan.Profile.Runtime != runnable.RuntimeK8s || plan.Profile.ProfileRevision != p.config.K8s.ProfileRevision {
+		return environment.VK8sProvisionRequest{}, runnable.NewArtifactFailure("k8s-profile", "K8s blank profile is not installed")
+	}
+	identity, err := p.k8s.Identity(binding.UID)
+	if err != nil {
+		return environment.VK8sProvisionRequest{}, fmt.Errorf("derive K8s environment identity: %w", err)
+	}
+	planDigest, err := plan.Digest()
+	if err != nil {
+		return environment.VK8sProvisionRequest{}, err
+	}
+	runtime := p.config.K8s
+	runtime.ImageDigest = plan.Image
+	purpose, err := environmentPurpose(binding.Purpose)
+	if err != nil {
+		return environment.VK8sProvisionRequest{}, err
+	}
+	return environment.VK8sProvisionRequest{EnvironmentUID: binding.UID, Revision: planDigest, Purpose: purpose, Identity: identity, Runtime: runtime, Blank: true}, nil
+}
+
+// k8sReleaseRequest is the identity-driven teardown request. Blank release
+// deliberately skips plan validation and the plan digest fence: a plan change
+// across a controller upgrade must not block cleanup of live environments.
+func (p *EnvironmentProvider) k8sReleaseRequest(binding runtimeenvironment.Binding) (environment.VK8sProvisionRequest, error) {
+	if binding.BlankRuntime == nil {
+		return p.k8sRequest(binding)
+	}
+	identity, err := p.k8s.Identity(binding.UID)
+	if err != nil {
+		return environment.VK8sProvisionRequest{}, fmt.Errorf("derive K8s environment identity: %w", err)
+	}
+	purpose, err := environmentPurpose(binding.Purpose)
+	if err != nil {
+		return environment.VK8sProvisionRequest{}, err
+	}
+	return environment.VK8sProvisionRequest{EnvironmentUID: binding.UID, Purpose: purpose, Identity: identity, Runtime: p.config.K8s, Blank: true}, nil
 }
 
 func environmentPurpose(purpose runnable.EnvironmentPurpose) (environment.Purpose, error) {

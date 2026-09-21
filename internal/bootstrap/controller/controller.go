@@ -70,6 +70,9 @@ func Run(ctx context.Context, configPath string) error {
 	if err != nil {
 		return fmt.Errorf("create public runtime environment provider: %w", err)
 	}
+	if _, err := (blankPlans{cfg: cfg}).BlankPlan("k8s"); err != nil {
+		return fmt.Errorf("validate blank K8s runtime plan: %w", err)
+	}
 
 	scheme := runtime.NewScheme()
 	if err := runtimev2.AddToScheme(scheme); err != nil {
@@ -93,7 +96,7 @@ func Run(ctx context.Context, configPath string) error {
 	if err := manager.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		return fmt.Errorf("add readiness check: %w", err)
 	}
-	reconciler := &runtimeenvironment.Reconciler{Client: manager.GetClient(), Resolver: database.Runnable, Provider: provider, Reaps: database.Runnable}
+	reconciler := &runtimeenvironment.Reconciler{Client: manager.GetClient(), Resolver: database.Runnable, Provider: provider, Reaps: database.Runnable, Blank: blankPlans{cfg: cfg}}
 	if err := reconciler.SetupWithManager(manager); err != nil {
 		return fmt.Errorf("setup RuntimeEnvironment reconciler: %w", err)
 	}

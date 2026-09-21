@@ -122,6 +122,10 @@ type VK8sProvisionRequest struct {
 	Purpose        Purpose
 	Identity       VK8sEnvironmentIdentity
 	Runtime        VK8sRuntime
+	// Blank marks a content-free management terminal. The terminal image is
+	// the installed management terminal image and initialization deferral is
+	// requested through the environment instead of a runnable bundle marker.
+	Blank bool
 }
 
 type VK8sEnvironmentObservation struct {

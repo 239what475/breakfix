@@ -311,6 +311,101 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
+  /documentation/scenario:
+    get:
+      operationId: getDocumentationScenario
+      summary: Report the reader's blank practice scenario session (JWT)
+      description: One blank scenario per user, scoped to the pinned library and carried across every documentation page.
+      tags: [documentation]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current session state; state is none when no environment exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationScenarioEnvironment"
+        "401":
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createDocumentationScenario
+      summary: Create or adopt the reader's blank practice scenario (JWT)
+      description: Idempotent find-or-create; the response returns as soon as the environment is named and readiness arrives through polling.
+      tags: [documentation]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Session state after creation or adoption
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationScenarioEnvironment"
+        "401":
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: closeDocumentationScenario
+      summary: Close the blank practice scenario and release its resources (JWT)
+      description: Closing without an active session is a successful no-op.
+      tags: [documentation]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Session closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationScenarioCloseResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+
+  /documentation/scenario/reset:
+    post:
+      operationId: resetDocumentationScenario
+      summary: Wipe the blank practice scenario to a fresh state (JWT)
+      description: A Ready-session verb; an in-flight reset stays idempotent and returns the current session state.
+      tags: [documentation]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Reset requested; the session returns to creating
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationScenarioEnvironment"
+        "401":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /documentation/scenario/terminal-ticket:
+    post:
+      operationId: createBlankScenarioTerminalTicket
+      summary: Create a one-time ticket for the blank scenario terminal WebSocket (JWT)
+      tags: [documentation]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TerminalTicketRequest"
+      responses:
+        "200":
+          description: Short-lived one-time terminal ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalTicketResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
   /auth/register:
     post:
       operationId: register
@@ -2007,6 +2102,28 @@ components:
         reset_nonce:
           type: integer
           description: The bumped reset nonce of the environment
+
+    DocumentationScenarioEnvironment:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [none, creating, ready, failed]
+          description: Session state; lifecycle reclamation reads as none
+        environment_id:
+          type: string
+          description: Environment UID once a session exists
+        runtime:
+          type: string
+          description: Runtime kind, for example k8s
+
+    DocumentationScenarioCloseResponse:
+      type: object
+      required: [closed]
+      properties:
+        closed:
+          type: boolean
 
     DocumentationPracticeDetail:
       type: object

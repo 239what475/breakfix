@@ -31,6 +31,9 @@ const (
 	vk8sTerminalNetworkPolicyName     = "breakfix-vk8s-terminal"
 	vk8sRuntimeServiceAccount         = "breakfix-runtime"
 	vk8sInitSentinel                  = "/var/lib/breakfix/.initialized"
+	// vk8sBlankDeferEnv asks the base image entrypoint to defer initialization
+	// without a runnable bundle marker; blank terminals carry no content.
+	vk8sBlankDeferEnv = "BREAKFIX_DEFER_INITIALIZATION"
 )
 
 type vclusterCommand interface {
@@ -250,7 +253,10 @@ func vclusterNamespaceOwnershipCompatible(namespace *corev1.Namespace, request e
 	if value := strings.TrimSpace(namespace.Annotations[vk8sEnvironmentUIDAnnotation]); value != "" && value != request.EnvironmentUID {
 		return false
 	}
-	if value := strings.TrimSpace(namespace.Annotations[vk8sEnvironmentRevisionAnnotation]); value != "" && value != request.Revision {
+	// Blank release fences on the environment UID alone: the blank plan digest
+	// may legitimately drift across a controller upgrade while the environment
+	// stays live, and cleanup must not block on the stale annotation.
+	if value := strings.TrimSpace(namespace.Annotations[vk8sEnvironmentRevisionAnnotation]); value != "" && value != request.Revision && !request.Blank {
 		return false
 	}
 	if value := strings.TrimSpace(namespace.Labels[vk8sRuntimeLabel]); value != "" && value != vk8sRuntimeLabelValue {
@@ -458,7 +464,7 @@ func (p *vk8sEnvironmentProvider) ensureTerminal(ctx context.Context, request en
 	pods := p.k8s.Clientset().CoreV1().Pods(request.Identity.Namespace)
 	pod, err := pods.Get(ctx, request.Identity.TerminalPodName, metav1.GetOptions{})
 	if err == nil {
-		if pod.Annotations[vk8sEnvironmentUIDAnnotation] != request.EnvironmentUID || pod.Annotations[vk8sEnvironmentRevisionAnnotation] != request.Revision || pod.Labels[vk8sTerminalComponentLabel] != vk8sTerminalComponentValue || pod.Spec.ServiceAccountName != vk8sRuntimeServiceAccount || len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Image != request.Runtime.ImageDigest {
+		if pod.Annotations[vk8sEnvironmentUIDAnnotation] != request.EnvironmentUID || pod.Annotations[vk8sEnvironmentRevisionAnnotation] != request.Revision || pod.Labels[vk8sTerminalComponentLabel] != vk8sTerminalComponentValue || pod.Spec.ServiceAccountName != vk8sRuntimeServiceAccount || len(pod.Spec.Containers) != 1 || pod.Spec.Containers[0].Image != request.Runtime.ImageDigest || terminalBlankDefer(pod) != request.Blank {
 			return fmt.Errorf("VK8s terminal pod differs from immutable runtime snapshot")
 		}
 		return nil
@@ -565,6 +571,10 @@ func networkPolicyPort(protocol corev1.Protocol, port int) networkingv1.NetworkP
 
 func newVK8sTerminalPod(request environment.VK8sProvisionRequest, resources corev1.ResourceRequirements, kubeconfigMode int32) *corev1.Pod {
 	automount := false
+	env := []corev1.EnvVar{{Name: "KUBECONFIG", Value: "/root/.kube/config"}}
+	if request.Blank {
+		env = append(env, corev1.EnvVar{Name: vk8sBlankDeferEnv, Value: "1"})
+	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: request.Identity.TerminalPodName, Namespace: request.Identity.Namespace,
@@ -582,7 +592,7 @@ func newVK8sTerminalPod(request environment.VK8sProvisionRequest, resources core
 			Containers: []corev1.Container{{
 				Name: "runtime", Image: request.Runtime.ImageDigest, ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:    resources,
-				Env:          []corev1.EnvVar{{Name: "KUBECONFIG", Value: "/root/.kube/config"}},
+				Env:          env,
 				VolumeMounts: []corev1.VolumeMount{{Name: "kubeconfig", MountPath: "/root/.kube", ReadOnly: true}},
 			}},
 			Volumes: []corev1.Volume{{Name: "kubeconfig", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
@@ -591,6 +601,19 @@ func newVK8sTerminalPod(request environment.VK8sProvisionRequest, resources core
 			}}}},
 		},
 	}
+}
+
+// terminalBlankDefer reports whether the terminal pod requests initialization
+// deferral through the blank environment variable instead of a bundle marker.
+func terminalBlankDefer(pod *corev1.Pod) bool {
+	for _, container := range pod.Spec.Containers {
+		for _, variable := range container.Env {
+			if variable.Name == vk8sBlankDeferEnv && variable.Value == "1" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (p *vk8sEnvironmentProvider) observeTerminal(ctx context.Context, request environment.VK8sProvisionRequest) (environment.InitializationObservation, error) {

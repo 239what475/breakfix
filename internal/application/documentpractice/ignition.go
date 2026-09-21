@@ -42,11 +42,9 @@ func (d *IgnitionDispatcher) Ignite(ctx context.Context, workflowID, pagePath, a
 		return domain.Workflow{}, err
 	}
 	if workflow.State == domain.Planning && d.launch(workflowID) {
+		//nolint:gosec // the chain deliberately outlives the ignition request: it runs for minutes while the HTTP acknowledgment has already returned
 		go func() {
 			defer d.finish(workflowID)
-			// The chain owns its own lifetime: the ignition request's context
-			// dies with its acknowledgment, so the chain runs on the
-			// background context like the batch scheduler's ignite.
 			if _, err := d.pipeline.Start(context.Background(), workflowID, pagePath, anchor, nil); err != nil {
 				slog.Warn("documentation practice chain ended without a durable outcome", "workflow_id", workflowID, "page_path", pagePath, "anchor", anchor, "err", err)
 			}

@@ -32,6 +32,13 @@ type RevisionResolver interface {
 	ResolveRunnableRevision(context.Context, string, string) (runnable.RunnableRevision, error)
 }
 
+// BlankSource resolves the installed runtime definition for one blank runtime
+// provider. Blank environments name no runnable revision; their runtime
+// inputs come from controller configuration alone.
+type BlankSource interface {
+	BlankPlan(provider string) (runnable.BlankRuntimePlan, error)
+}
+
 // Provider creates and resets generic runtime resources. Concrete
 // implementations decide node or k8s behavior from revision.RuntimeProfile.
 // Release is intentionally owned by Reaper so reconciliation never blocks
@@ -54,6 +61,7 @@ type Reconciler struct {
 	Resolver RevisionResolver
 	Provider Provider
 	Reaps    runnable.ReapQueue
+	Blank    BlankSource
 	Now      func() time.Time
 }
 
@@ -87,19 +95,22 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		return ctrl.Result{RequeueAfter: statusStepRequeue}, nil
 	}
 
-	revision, err := r.Resolver.ResolveRunnableRevision(ctx, environment.Spec.RunnableRevisionRef.ID, environment.Spec.RunnableRevisionRef.Digest)
+	plan, err := r.resolvePlan(ctx, &environment)
 	if err != nil {
+		if errors.Is(err, errBlankRuntimeNotInstalled) {
+			return r.fail(ctx, &environment, runnable.FailureArtifact, "runtime-environment", "blank-runtime-not-installed", err)
+		}
 		result, updateErr := r.infrastructureFailure(ctx, &environment, "revision-resolver", "revision-unavailable", err)
 		if updateErr != nil {
 			return result, updateErr
 		}
 		return ctrl.Result{RequeueAfter: providerRetryRequeue}, nil //nolint:nilerr // requeue is the controller idiom for retryable handoffs
 	}
-	if err := ValidateSpec(environment, revision); err != nil {
+	if err := ValidateSpec(environment, plan); err != nil {
 		return r.fail(ctx, &environment, runnable.FailureArtifact, "runtime-environment", "invalid-revision-binding", err)
 	}
 	observedReset := parseObservedResetNonce(environment.Annotations)
-	decision, err := Decide(environment, revision, r.now(), observedReset)
+	decision, err := Decide(environment, plan, r.now(), observedReset)
 	if err != nil {
 		return r.fail(ctx, &environment, runnable.FailureArtifact, "runtime-environment", "invalid-lifecycle", err)
 	}
@@ -115,7 +126,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		}
 		return ctrl.Result{RequeueAfter: statusStepRequeue}, nil
 	}
-	binding := Binding{Namespace: environment.Namespace, Name: environment.Name, UID: string(environment.UID), Purpose: runnable.EnvironmentPurpose(environment.Spec.Purpose), RunnableRevision: revision}
+	binding := environmentBinding(&environment, plan)
 	switch decision {
 	case DecisionProvision:
 		if environment.Status.Phase == "" || environment.Status.Phase == runtimev2.PhasePending {
@@ -127,9 +138,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 			}
 			return ctrl.Result{RequeueAfter: statusStepRequeue}, nil
 		}
-		timeoutSeconds := revision.Spec.LifecyclePolicy.CreateTimeoutSeconds
+		timeoutSeconds := plan.Lifecycle().CreateTimeoutSeconds
 		if environment.Status.Operation == runtimev2.OperationResetting {
-			timeoutSeconds = revision.Spec.LifecyclePolicy.ResetTimeoutSeconds
+			timeoutSeconds = plan.Lifecycle().ResetTimeoutSeconds
 		}
 		operationCtx, cancel := withLifecycleTimeout(ctx, timeoutSeconds)
 		defer cancel()
@@ -137,7 +148,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		if err != nil {
 			return r.providerFailure(ctx, &environment, err)
 		}
-		return r.applyObservation(ctx, &environment, revision, observation, environment.Status.Operation)
+		return r.applyObservation(ctx, &environment, plan, observation, environment.Status.Operation)
 	case DecisionReset:
 		if environment.Annotations == nil {
 			environment.Annotations = make(map[string]string)
@@ -152,13 +163,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		}); err != nil {
 			return ctrl.Result{}, err
 		}
-		operationCtx, cancel := withLifecycleTimeout(ctx, revision.Spec.LifecyclePolicy.ResetTimeoutSeconds)
+		operationCtx, cancel := withLifecycleTimeout(ctx, plan.Lifecycle().ResetTimeoutSeconds)
 		defer cancel()
 		observation, err := r.Provider.Reset(operationCtx, binding)
 		if err != nil {
 			return r.providerFailure(ctx, &environment, err)
 		}
-		return r.applyObservation(ctx, &environment, revision, observation, runtimev2.OperationResetting)
+		return r.applyObservation(ctx, &environment, plan, observation, runtimev2.OperationResetting)
 	case DecisionReap:
 		return r.reconcileReap(ctx, &environment, binding)
 	default:
@@ -166,8 +177,53 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 	}
 }
 
-func (r *Reconciler) applyObservation(ctx context.Context, environment *runtimev2.RuntimeEnvironment, revision runnable.RunnableRevision, observation Observation, operation runtimev2.EnvironmentOperation) (ctrl.Result, error) {
-	profileDigest, err := revision.Spec.RuntimeProfile.Digest()
+// errBlankRuntimeNotInstalled marks a blank environment whose provider has no
+// installed plan; it is a deployment configuration error, not retryable
+// infrastructure noise.
+var errBlankRuntimeNotInstalled = errors.New("blank runtime has no installed plan")
+
+// resolvePlan resolves the runtime definition for one environment: the
+// immutable runnable revision for content-bound environments, the installed
+// blank plan for blank ones.
+func (r *Reconciler) resolvePlan(ctx context.Context, environment *runtimev2.RuntimeEnvironment) (Plan, error) {
+	if environment.Spec.BlankRuntime == nil {
+		revision, err := r.Resolver.ResolveRunnableRevision(ctx, environment.Spec.RunnableRevisionRef.ID, environment.Spec.RunnableRevisionRef.Digest)
+		if err != nil {
+			return Plan{}, err
+		}
+		return Plan{Revision: revision}, nil
+	}
+	plan, err := r.blankPlan(environment.Spec.BlankRuntime.Provider)
+	if err != nil {
+		return Plan{}, err
+	}
+	return Plan{Blank: &plan}, nil
+}
+
+func (r *Reconciler) blankPlan(provider string) (runnable.BlankRuntimePlan, error) {
+	if r.Blank == nil {
+		return runnable.BlankRuntimePlan{}, fmt.Errorf("%w: %s", errBlankRuntimeNotInstalled, provider)
+	}
+	plan, err := r.Blank.BlankPlan(provider)
+	if err != nil {
+		return runnable.BlankRuntimePlan{}, fmt.Errorf("%w: %s: %w", errBlankRuntimeNotInstalled, provider, err)
+	}
+	return plan, nil
+}
+
+// environmentBinding builds the provider binding for one environment. Blank
+// deletion must stay resolvable without an installed plan, so the deletion
+// path may pass a zero plan and rely on the provider's k8s-only fallback.
+func environmentBinding(environment *runtimev2.RuntimeEnvironment, plan Plan) Binding {
+	binding := Binding{Namespace: environment.Namespace, Name: environment.Name, UID: string(environment.UID), Purpose: runnable.EnvironmentPurpose(environment.Spec.Purpose), RunnableRevision: plan.Revision}
+	if plan.Blank != nil {
+		binding.BlankRuntime = plan.Blank
+	}
+	return binding
+}
+
+func (r *Reconciler) applyObservation(ctx context.Context, environment *runtimev2.RuntimeEnvironment, plan Plan, observation Observation, operation runtimev2.EnvironmentOperation) (ctrl.Result, error) {
+	profileDigest, err := plan.Profile().Digest()
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -179,7 +235,7 @@ func (r *Reconciler) applyObservation(ctx context.Context, environment *runtimev
 		phase = runtimev2.PhaseReady
 		operation = runtimev2.OperationNone
 	}
-	expiresAt, err := ExpiresAt(environment.CreationTimestamp.Time, environment.Spec.Lease, revision.Spec.LifecyclePolicy)
+	expiresAt, err := ExpiresAt(environment.CreationTimestamp.Time, environment.Spec.Lease, plan.Lifecycle())
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -187,7 +243,7 @@ func (r *Reconciler) applyObservation(ctx context.Context, environment *runtimev
 	if err := r.updateStatus(ctx, environment, func(status *runtimev2.RuntimeEnvironmentStatus) {
 		status.Phase = phase
 		status.Operation = operation
-		status.Runtime.Provider = string(revision.Spec.RuntimeProfile.Runtime)
+		status.Runtime.Provider = string(plan.Runtime())
 		status.Runtime.ProfileDigest = profileDigest
 		status.Runtime.ResourceRefs = append([]runtimev2.ResourceReference(nil), observation.ResourceRefs...)
 		status.Runtime.EndpointRefs = append([]runtimev2.EndpointReference(nil), observation.EndpointRefs...)
@@ -206,17 +262,19 @@ func (r *Reconciler) reconcileDeletion(ctx context.Context, environment *runtime
 	if !controllerutil.ContainsFinalizer(environment, finalizer) {
 		return ctrl.Result{}, nil
 	}
-	// Deletion must still use a resolved revision so Reaper never receives an
-	// unverified artifact reference from mutable CRD state.
-	revision, err := r.Resolver.ResolveRunnableRevision(ctx, environment.Spec.RunnableRevisionRef.ID, environment.Spec.RunnableRevisionRef.Digest)
+	// Deletion must still use a resolved definition so Reaper never receives
+	// an unverified artifact reference from mutable CRD state. A blank
+	// environment deletes through its installed plan, exactly like a
+	// content-bound environment deletes through its immutable revision.
+	plan, err := r.resolvePlan(ctx, environment)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	return r.reconcileReap(ctx, environment, Binding{Namespace: environment.Namespace, Name: environment.Name, UID: string(environment.UID), Purpose: runnable.EnvironmentPurpose(environment.Spec.Purpose), RunnableRevision: revision})
+	return r.reconcileReap(ctx, environment, environmentBinding(environment, plan))
 }
 
 func (r *Reconciler) reconcileReap(ctx context.Context, environment *runtimev2.RuntimeEnvironment, binding Binding) (ctrl.Result, error) {
-	revisionDigest, err := binding.RunnableRevision.Digest()
+	revisionDigest, err := binding.Digest()
 	if err != nil {
 		return ctrl.Result{}, err
 	}

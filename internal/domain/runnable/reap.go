@@ -38,13 +38,25 @@ func (p EnvironmentPurpose) Valid() bool {
 
 // EnvironmentBinding names one concrete provider resource set. It contains a
 // complete immutable runnable revision so lifecycle consumers never receive a
-// mutable artifact reference from an Environment object.
+// mutable artifact reference from an Environment object. A blank environment
+// carries no revision: BlankRuntime supplies the installed runtime definition
+// instead and RunnableRevision stays zero-valued.
 type EnvironmentBinding struct {
 	Namespace        string             `json:"namespace"`
 	Name             string             `json:"name"`
 	UID              string             `json:"uid"`
 	Purpose          EnvironmentPurpose `json:"purpose"`
 	RunnableRevision RunnableRevision   `json:"runnable_revision"`
+	BlankRuntime     *BlankRuntimePlan  `json:"blank_runtime,omitempty"`
+}
+
+// Digest is the revision fence for one binding: the runnable revision digest
+// for content-bound environments, the blank plan digest for blank ones.
+func (b EnvironmentBinding) Digest() (string, error) {
+	if b.BlankRuntime != nil {
+		return b.BlankRuntime.Digest()
+	}
+	return b.RunnableRevision.Digest()
 }
 
 // ReapRequest is immutable once enqueued. UID and revision digest fence the
@@ -68,7 +80,7 @@ func (r ReapRequest) Valid() error {
 	if r.Namespace != r.Binding.Namespace || r.Name != r.Binding.Name || r.UID != r.Binding.UID || !r.Binding.Purpose.Valid() {
 		return errors.New("runnable reap request binding does not match identity")
 	}
-	digest, err := r.Binding.RunnableRevision.Digest()
+	digest, err := r.Binding.Digest()
 	if err != nil {
 		return fmt.Errorf("runnable reap revision: %w", err)
 	}

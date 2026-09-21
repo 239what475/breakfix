@@ -25,11 +25,12 @@ func TestDecideUsesLeaseAndLifecycleWithoutContentFields(t *testing.T) {
 		},
 		Status: runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhaseReady},
 	}
-	decision, err := Decide(environment, revision, createdAt.Add(14*time.Minute), 0)
+	plan := Plan{Revision: revision}
+	decision, err := Decide(environment, plan, createdAt.Add(14*time.Minute), 0)
 	if err != nil || decision != DecisionNone {
 		t.Fatalf("decision before idle expiry = %q, %v", decision, err)
 	}
-	decision, err = Decide(environment, revision, createdAt.Add(16*time.Minute), 0)
+	decision, err = Decide(environment, plan, createdAt.Add(16*time.Minute), 0)
 	if err != nil || decision != DecisionDrain {
 		t.Fatalf("decision after idle expiry = %q, %v", decision, err)
 	}
@@ -47,12 +48,13 @@ func TestDecideFencesResetAndReap(t *testing.T) {
 		Spec:       runtimev2.RuntimeEnvironmentSpec{RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: "revision-01", Digest: digest}, Purpose: runtimev2.PurposeLearning, Lease: runtimev2.LeaseSpec{RenewedAt: metav1.NewTime(now)}, ResetNonce: 2},
 		Status:     runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhaseReady},
 	}
-	decision, err := Decide(environment, revision, now.Add(time.Minute), 1)
+	plan := Plan{Revision: revision}
+	decision, err := Decide(environment, plan, now.Add(time.Minute), 1)
 	if err != nil || decision != DecisionReset {
 		t.Fatalf("reset decision = %q, %v", decision, err)
 	}
 	environment.Status.Phase = runtimev2.PhaseDraining
-	decision, err = Decide(environment, revision, now.Add(time.Minute), 1)
+	decision, err = Decide(environment, plan, now.Add(time.Minute), 1)
 	if err != nil || decision != DecisionReap {
 		t.Fatalf("reap decision = %q, %v", decision, err)
 	}
@@ -66,7 +68,7 @@ func TestValidateSpecRejectsRevisionOrProfileMismatch(t *testing.T) {
 	}
 	environment := runtimev2.RuntimeEnvironment{Spec: runtimev2.RuntimeEnvironmentSpec{RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: "revision-01", Digest: digest}, Purpose: runtimev2.PurposeVerification, Lease: runtimev2.LeaseSpec{RenewedAt: metav1.NewTime(time.Now())}}}
 	environment.Spec.RunnableRevisionRef.Digest = "sha256:" + strings.Repeat("f", 64)
-	if err := ValidateSpec(environment, revision); err == nil || !strings.Contains(err.Error(), "does not match") {
+	if err := ValidateSpec(environment, Plan{Revision: revision}); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("expected revision mismatch, got %v", err)
 	}
 }

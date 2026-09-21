@@ -22,9 +22,12 @@ var errNoActiveAssistantEnvironment = errors.New("no active environment for assi
 const (
 	// environmentContentOperations is the content-kind label of environments
 	// pinned to Operations scenarios; environmentContentDocumentationPractice
-	// matches the runnable Kind of published documentation practices.
+	// matches the runnable Kind of published documentation practices;
+	// environmentContentDocumentationBlank pins the library-scoped blank
+	// practice environment each reader may run alongside the documentation.
 	environmentContentOperations            = "operations"
 	environmentContentDocumentationPractice = "documentation-practice"
+	environmentContentDocumentationBlank    = "documentation-blank"
 )
 
 // environmentContentTarget is the content identity one learning environment is
@@ -38,6 +41,9 @@ type environmentContentTarget struct {
 	revisionID string
 	runtime    string
 	title      string
+	// blank marks a content-free environment: no runnable revision resolves
+	// and creation names the system blank runtime instead.
+	blank bool
 	// resolveBinding supplies the immutable runnable revision the environment
 	// runs. Catalog-backed content resolves lazily through its revision
 	// binding; a published practice already carries its reference.
@@ -93,12 +99,14 @@ type activeEnvironment struct {
 	SourceRevision         string
 	RunnableRevisionID     string
 	RunnableRevisionDigest string
+	Blank                  bool
 	Purpose                runtimev2.EnvironmentPurpose
 	Namespace              string
 	WorkspacePod           string
 	NodeIdentity           incus.NodeEnvironmentIdentity
 	Nodes                  []activeNode
 	Phase                  runtimev2.EnvironmentPhase
+	Operation              runtimev2.EnvironmentOperation
 	Deleting               bool
 	ReadyAt                *metav1.Time
 	ExpiresAt              *metav1.Time
@@ -121,7 +129,8 @@ func environmentFromRuntime(environment *runtimev2.RuntimeEnvironment) *activeEn
 		UID: string(environment.UID), Runtime: runtimeName, Name: environment.Name,
 		UserID: labels["breakfix.dev/user"], ScenarioRef: labels["breakfix.dev/content-id"], SourceRevision: labels["breakfix.dev/content-revision"],
 		RunnableRevisionID: environment.Spec.RunnableRevisionRef.ID, RunnableRevisionDigest: environment.Spec.RunnableRevisionRef.Digest,
-		Purpose: environment.Spec.Purpose, Phase: phase, Deleting: environment.DeletionTimestamp != nil,
+		Blank:   environment.Spec.BlankRuntime != nil,
+		Purpose: environment.Spec.Purpose, Phase: phase, Operation: environment.Status.Operation, Deleting: environment.DeletionTimestamp != nil,
 	}
 	if environment.Status.Lifecycle.ExpiresAt != nil {
 		expires := environment.Status.Lifecycle.ExpiresAt.DeepCopy()
@@ -444,7 +453,8 @@ func environmentMatchesTarget(environment *activeEnvironment, userID string, tar
 		environment.Purpose == runtimev2.PurposeLearning &&
 		environment.ScenarioRef == target.id &&
 		environment.SourceRevision == target.revisionID &&
-		environment.Runtime == target.runtime
+		environment.Runtime == target.runtime &&
+		environment.Blank == target.blank
 }
 
 func environmentDeletionTimeout(runtime string) time.Duration {

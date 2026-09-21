@@ -139,9 +139,10 @@ func (p *fakeNodeEnvironmentProvider) DeleteNodeEnvironment(_ context.Context, _
 }
 
 type fakeK8sEnvironmentProvider struct {
-	request     environment.VK8sProvisionRequest
-	provisioned int
-	deleted     int
+	request       environment.VK8sProvisionRequest
+	deleteRequest environment.VK8sProvisionRequest
+	provisioned   int
+	deleted       int
 }
 
 func (p *fakeK8sEnvironmentProvider) Identity(_ string) (environment.VK8sEnvironmentIdentity, error) {
@@ -154,7 +155,8 @@ func (p *fakeK8sEnvironmentProvider) Provision(_ context.Context, request enviro
 	return environment.VK8sEnvironmentObservation{ControlPlaneReady: true, KubeconfigReady: true, TerminalReady: true}, nil
 }
 
-func (p *fakeK8sEnvironmentProvider) Delete(_ context.Context, _ environment.VK8sProvisionRequest) (bool, error) {
+func (p *fakeK8sEnvironmentProvider) Delete(_ context.Context, request environment.VK8sProvisionRequest) (bool, error) {
+	p.deleteRequest = request
 	p.deleted++
 	return true, nil
 }
