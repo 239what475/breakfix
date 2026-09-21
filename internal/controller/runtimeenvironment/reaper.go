@@ -72,7 +72,7 @@ func (r *Reaper) RunOnce(ctx context.Context) (bool, error) {
 		diagnostic = "runtime environment stop is still in progress"
 	}
 	if stopErr == nil && stopped {
-		operationCtx, cancel := withLifecycleTimeout(ctx, claim.Record.Request.Binding.RunnableRevision.Spec.LifecyclePolicy.ReapTimeoutSeconds)
+		operationCtx, cancel := withLifecycleTimeout(ctx, claim.Record.Request.Binding.Lifecycle().ReapTimeoutSeconds)
 		done, releaseErr := r.Provider.Release(operationCtx, claim.Record.Request.Binding)
 		cancel()
 		success = done || errors.Is(releaseErr, ErrResourceAbsent)
@@ -91,7 +91,7 @@ func (r *Reaper) RunOnce(ctx context.Context) (bool, error) {
 }
 
 func (r *Reaper) stop(ctx context.Context, binding Binding) (bool, error) {
-	operationCtx, cancel := withLifecycleTimeout(ctx, binding.RunnableRevision.Spec.LifecyclePolicy.StopTimeoutSeconds)
+	operationCtx, cancel := withLifecycleTimeout(ctx, binding.Lifecycle().StopTimeoutSeconds)
 	defer cancel()
 	return r.Provider.Stop(operationCtx, binding)
 }

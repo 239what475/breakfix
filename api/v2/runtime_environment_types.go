@@ -35,7 +35,9 @@ const (
 )
 
 type RunnableRevisionReference struct {
-	ID     string `json:"id"`
+	// +kubebuilder:validation:MinLength=1
+	ID string `json:"id"`
+	// +kubebuilder:validation:MinLength=1
 	Digest string `json:"digest"`
 }
 
@@ -52,16 +54,18 @@ type LeaseSpec struct {
 // profile, artifact, plan, and lifecycle policy are dereferenced from the
 // immutable RunnableRevision and never copied into the CRD; a blank
 // environment names no revision and the Controller resolves its installed
-// runtime definition from configuration instead.
-// +kubebuilder:validation:XValidation:rule="oldSelf == null || self.runnableRevisionRef == oldSelf.runnableRevisionRef",message="runnableRevisionRef is immutable"
-// +kubebuilder:validation:XValidation:rule="oldSelf == null || self.blankRuntime == oldSelf.blankRuntime",message="blankRuntime is immutable"
-// +kubebuilder:validation:XValidation:rule="!has(self.blankRuntime) || (self.runnableRevisionRef.id == ” && self.runnableRevisionRef.digest == ”)",message="blankRuntime excludes runnableRevisionRef"
-// +kubebuilder:validation:XValidation:rule="has(self.blankRuntime) || (self.runnableRevisionRef.id != ” && self.runnableRevisionRef.digest != ”)",message="runnableRevisionRef requires id and digest when blankRuntime is absent"
+// runtime definition from configuration instead. Exactly one of
+// runnableRevisionRef or blankRuntime is present: id and digest are required
+// whenever the reference object is present, so presence is completeness.
+// +kubebuilder:validation:XValidation:rule="oldSelf == null || (has(oldSelf.runnableRevisionRef) == has(self.runnableRevisionRef) && (!has(self.runnableRevisionRef) || self.runnableRevisionRef == oldSelf.runnableRevisionRef))",message="runnableRevisionRef is immutable"
+// +kubebuilder:validation:XValidation:rule="oldSelf == null || (has(oldSelf.blankRuntime) == has(self.blankRuntime) && (!has(self.blankRuntime) || self.blankRuntime == oldSelf.blankRuntime))",message="blankRuntime is immutable"
+// +kubebuilder:validation:XValidation:rule="!has(self.blankRuntime) || !has(self.runnableRevisionRef)",message="blankRuntime excludes runnableRevisionRef"
+// +kubebuilder:validation:XValidation:rule="has(self.blankRuntime) || has(self.runnableRevisionRef)",message="runnableRevisionRef is required when blankRuntime is absent"
 // +kubebuilder:validation:XValidation:rule="oldSelf == null || self.purpose == oldSelf.purpose",message="purpose is immutable"
 // +kubebuilder:validation:XValidation:rule="oldSelf == null || !has(oldSelf.resetNonce) || (has(self.resetNonce) && self.resetNonce >= oldSelf.resetNonce)",message="resetNonce must be monotonic"
 type RuntimeEnvironmentSpec struct {
 	// +optional
-	RunnableRevisionRef RunnableRevisionReference `json:"runnableRevisionRef,omitempty"`
+	RunnableRevisionRef *RunnableRevisionReference `json:"runnableRevisionRef,omitempty"`
 	// +optional
 	BlankRuntime *BlankRuntimeSpec `json:"blankRuntime,omitempty"`
 	// +kubebuilder:validation:Enum=learning;verification

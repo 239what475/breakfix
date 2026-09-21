@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { registerAndLogin } from "../support/live-helpers";
+import { totpCode } from "../support/live-helpers";
 
 const apiBase = process.env.BREAKFIX_E2E_BASE_URL;
 const source = "kubernetes";
@@ -7,6 +7,28 @@ const version = "snapshot-ce98a43";
 const readerUrl = `/documentation?source=${source}&version=${version}&path=%2Fdocs%2Fconcepts%2Fworkloads%2Fpods%2Fpod-lifecycle%2F`;
 
 type ScenarioState = { state: string; environment_id?: string; runtime?: string };
+
+// The suite drives the prepared Kind target through absolute URLs: unlike
+// the agent-live configs, this playwright config sets no baseURL.
+async function registerAndLogin(page: Page): Promise<string> {
+  if (!apiBase) throw new Error("BREAKFIX_E2E_BASE_URL is required for the blank scenario suite");
+  const username = `doc-blank-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const password = "test-password-123";
+  await page.goto(`${apiBase}/`);
+  await page.getByRole("button", { name: "Register", exact: true }).click();
+  await page.locator('input[autocomplete="username"]').fill(username);
+  await page.locator('input[autocomplete="new-password"]').fill(password);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  const secret = await page.locator(".totp-setup code").textContent();
+  await page.getByRole("button", { name: "Continue to sign in", exact: true }).click();
+  await page.locator('input[autocomplete="username"]').fill(username);
+  await page.locator('input[autocomplete="current-password"]').fill(password);
+  await page.locator('input[autocomplete="one-time-code"]').fill(await totpCode(page, secret ?? ""));
+  await page.getByRole("dialog").getByRole("button", { name: "Sign in", exact: true }).click();
+  // The topbar's "My space" entry appears only for a signed-in reader.
+  await expect(page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "My space", exact: true })).toBeVisible({ timeout: 30_000 });
+  return username;
+}
 
 async function scenarioState(request: APIRequestContext, token: string): Promise<ScenarioState> {
   const response = await request.get(`${apiBase}/api/documentation/scenario`, {
@@ -17,10 +39,7 @@ async function scenarioState(request: APIRequestContext, token: string): Promise
 }
 
 async function openReader(page: Page): Promise<string> {
-  if (!apiBase) throw new Error("BREAKFIX_E2E_BASE_URL is required for the blank scenario suite");
-  await page.goto(`${apiBase}/`);
   await registerAndLogin(page);
-  await expect(page.getByRole("button", { name: "Navigation", exact: true })).toBeVisible();
   const token = await page.evaluate(() => localStorage.getItem("token") ?? "");
   expect(token).not.toBe("");
   await page.goto(`${apiBase}${readerUrl}`);

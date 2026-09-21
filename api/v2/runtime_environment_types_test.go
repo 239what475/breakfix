@@ -14,7 +14,7 @@ func TestRuntimeEnvironmentDeepCopyKeepsMutableFieldsIndependent(t *testing.T) {
 	releaseAt := metav1.NewTime(time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC))
 	value := &RuntimeEnvironment{
 		Spec: RuntimeEnvironmentSpec{
-			RunnableRevisionRef: RunnableRevisionReference{ID: "revision-01", Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			RunnableRevisionRef: &RunnableRevisionReference{ID: "revision-01", Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 			Purpose:             PurposeLearning, Lease: LeaseSpec{RenewedAt: releaseAt, ReleaseAt: &releaseAt},
 		},
 		Status: RuntimeEnvironmentStatus{Runtime: RuntimeStatus{Provider: "node", ProfileDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", ResourceRefs: []ResourceReference{{Provider: "incus", Kind: "instance", ID: "node-01"}}}},

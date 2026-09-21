@@ -5,11 +5,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	docsource "github.com/breakfix/breakfix/internal/adapter/documentation"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // fakeBlankScenarioLibrary pins the library identity the blank scenario binds
@@ -253,5 +255,61 @@ func TestBlankScenarioStateProjectsReclamationAsNone(t *testing.T) {
 		if got := blankScenarioState(env); got != want {
 			t.Fatalf("state(%s/%s) = %q, want %q", env.Phase, env.Operation, got, want)
 		}
+	}
+}
+
+func TestBlankScenarioPollingRenewsPreparingSessionLease(t *testing.T) {
+	state := newEnvironmentAPITestState()
+	handler := newBlankScenarioHandler(t, state)
+
+	blankScenarioRequest(handler, http.MethodPost, "", true)
+	name := blankScenarioEnvironmentName()
+
+	// Age the lease: a stale idle deadline is what polling must push back.
+	state.mu.Lock()
+	environment := state.environments[name]
+	environment.Spec.Lease.RenewedAt = metav1.NewTime(time.Now().UTC().Add(-10 * time.Minute))
+	state.environments[name] = environment
+	state.mu.Unlock()
+
+	recorder := blankScenarioRequest(handler, http.MethodGet, "", true)
+	if blankScenarioBody(t, recorder).State != api.DocumentationScenarioEnvironmentStateCreating {
+		t.Fatalf("preparing state = %s", recorder.Body.String())
+	}
+	state.mu.Lock()
+	renewed := state.environments[name].Spec.Lease.RenewedAt.Time
+	state.mu.Unlock()
+	if renewed.Before(time.Now().UTC().Add(-time.Minute)) {
+		t.Fatalf("preparing lease was not renewed: %s", renewed)
+	}
+}
+
+func TestBlankScenarioVisibleWhileProvisioningWithoutRuntimeProjection(t *testing.T) {
+	state := newEnvironmentAPITestState()
+	handler := newBlankScenarioHandler(t, state)
+
+	blankScenarioRequest(handler, http.MethodPost, "", true)
+	name := blankScenarioEnvironmentName()
+
+	// Early provisioning: the controller has not observed the environment
+	// yet, so the runtime provider projection is empty. The label-based
+	// lookup is blind here; the session must stay visible by name and the
+	// polling read must keep the idle lease alive.
+	state.mu.Lock()
+	environment := state.environments[name]
+	environment.Status = runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhaseProvisioning}
+	environment.Spec.Lease.RenewedAt = metav1.NewTime(time.Now().UTC().Add(-10 * time.Minute))
+	state.environments[name] = environment
+	state.mu.Unlock()
+
+	recorder := blankScenarioRequest(handler, http.MethodGet, "", true)
+	if blankScenarioBody(t, recorder).State != api.DocumentationScenarioEnvironmentStateCreating {
+		t.Fatalf("provisioning state = %s", recorder.Body.String())
+	}
+	state.mu.Lock()
+	renewed := state.environments[name].Spec.Lease.RenewedAt.Time
+	state.mu.Unlock()
+	if renewed.Before(time.Now().UTC().Add(-time.Minute)) {
+		t.Fatalf("provisioning lease was not renewed: %s", renewed)
 	}
 }

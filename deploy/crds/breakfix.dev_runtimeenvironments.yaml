@@ -51,7 +51,9 @@ spec:
               profile, artifact, plan, and lifecycle policy are dereferenced from the
               immutable RunnableRevision and never copied into the CRD; a blank
               environment names no revision and the Controller resolves its installed
-              runtime definition from configuration instead.
+              runtime definition from configuration instead. Exactly one of
+              runnableRevisionRef or blankRuntime is present: id and digest are required
+              whenever the reference object is present, so presence is completeness.
             properties:
               blankRuntime:
                 description: |-
@@ -98,8 +100,10 @@ spec:
               runnableRevisionRef:
                 properties:
                   digest:
+                    minLength: 1
                     type: string
                   id:
+                    minLength: 1
                     type: string
                 required:
                 - digest
@@ -111,16 +115,16 @@ spec:
             type: object
             x-kubernetes-validations:
             - message: runnableRevisionRef is immutable
-              rule: oldSelf == null || self.runnableRevisionRef == oldSelf.runnableRevisionRef
+              rule: oldSelf == null || (has(oldSelf.runnableRevisionRef) == has(self.runnableRevisionRef)
+                && (!has(self.runnableRevisionRef) || self.runnableRevisionRef ==
+                oldSelf.runnableRevisionRef))
             - message: blankRuntime is immutable
-              rule: oldSelf == null || self.blankRuntime == oldSelf.blankRuntime
+              rule: oldSelf == null || (has(oldSelf.blankRuntime) == has(self.blankRuntime)
+                && (!has(self.blankRuntime) || self.blankRuntime == oldSelf.blankRuntime))
             - message: blankRuntime excludes runnableRevisionRef
-              rule: '!has(self.blankRuntime) || (self.runnableRevisionRef.id == ”
-                && self.runnableRevisionRef.digest == ”)'
-            - message: runnableRevisionRef requires id and digest when blankRuntime
-                is absent
-              rule: has(self.blankRuntime) || (self.runnableRevisionRef.id != ” &&
-                self.runnableRevisionRef.digest != ”)
+              rule: '!has(self.blankRuntime) || !has(self.runnableRevisionRef)'
+            - message: runnableRevisionRef is required when blankRuntime is absent
+              rule: has(self.blankRuntime) || has(self.runnableRevisionRef)
             - message: purpose is immutable
               rule: oldSelf == null || self.purpose == oldSelf.purpose
             - message: resetNonce must be monotonic

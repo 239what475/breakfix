@@ -201,3 +201,32 @@ func TestValidateSpecSeparatesBlankAndRevisionArms(t *testing.T) {
 		t.Fatal("blank provider mismatch accepted")
 	}
 }
+
+func TestReaperUsesBlankPlanLifecycleForBlankBindings(t *testing.T) {
+	now := fixedRuntimeEnvironmentTime()
+	plan := blankTestPlan(t)
+	queue := NewInMemoryReapQueue()
+	binding := Binding{Namespace: "breakfix-system", Name: "blank-environment", UID: "blank-environment-uid", Purpose: runnable.PurposeLearning, BlankRuntime: &plan}
+	digest, err := plan.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := ReapRequest{Namespace: binding.Namespace, Name: binding.Name, UID: binding.UID, Revision: digest, Binding: binding}
+	if err := queue.Enqueue(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	// A blank binding carries a zero runnable revision; the reaper must still
+	// release through the plan lifecycle instead of expiring instantly.
+	provider := &reconcilerProvider{stopDone: true, releaseDone: true}
+	reaper := &Reaper{Queue: queue, Provider: provider, Owner: "reaper-a", Now: func() time.Time { return now }}
+	if processed, err := reaper.RunOnce(context.Background()); err != nil || !processed {
+		t.Fatalf("blank reap processed=%t err=%v", processed, err)
+	}
+	record, err := queue.Get(context.Background(), request.Key())
+	if err != nil || record.State != ReapSucceeded {
+		t.Fatalf("blank reap record=%#v err=%v", record, err)
+	}
+	if provider.lastRelease.BlankRuntime == nil {
+		t.Fatal("blank reap released without the blank plan binding")
+	}
+}

@@ -35,6 +35,33 @@ func TestVClusterNamespaceOwnershipAcceptsChartMetadataAfterReset(t *testing.T) 
 	}
 }
 
+func TestVClusterNamespaceOwnershipAcceptsBlankReleaseWithoutDigestFence(t *testing.T) {
+	// A blank environment provisioned before a controller upgrade freezes the
+	// plan digest into the namespace; release carries no digest and must clear
+	// ownership on the environment UID alone.
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "breakfix-vk8s-environment", Labels: map[string]string{vk8sRuntimeLabel: vk8sRuntimeLabelValue}, Annotations: map[string]string{
+		vk8sEnvironmentUIDAnnotation:      "environment-uid",
+		vk8sEnvironmentRevisionAnnotation: "sha256:stale-plan-digest",
+	}}}
+	release := environment.VK8sProvisionRequest{EnvironmentUID: "environment-uid", Blank: true, Identity: environment.VK8sEnvironmentIdentity{Namespace: namespace.Name}}
+	if err := verifyVK8sNamespaceOwner(namespace, release); err != nil {
+		t.Fatalf("blank release was blocked by the digest fence: %v", err)
+	}
+	release.EnvironmentUID = "another-environment"
+	if err := verifyVK8sNamespaceOwner(namespace, release); err == nil {
+		t.Fatal("blank release adopted a namespace owned by another environment")
+	}
+	// Provision and reset still fence on the digest, blank or not.
+	reset := environment.VK8sProvisionRequest{EnvironmentUID: "environment-uid", Revision: "sha256:another-plan-digest", Blank: true, Identity: release.Identity}
+	if err := verifyVK8sNamespaceOwner(namespace, reset); err == nil {
+		t.Fatal("blank reset accepted a namespace bound to another plan digest")
+	}
+	reset.Revision = "sha256:stale-plan-digest"
+	if err := verifyVK8sNamespaceOwner(namespace, reset); err != nil {
+		t.Fatalf("blank reset with the matching digest was rejected: %v", err)
+	}
+}
+
 func TestNewVK8sTerminalPodUsesRuntimeServiceAccountForRegistryPull(t *testing.T) {
 	request := environment.VK8sProvisionRequest{
 		EnvironmentUID: "environment-uid",

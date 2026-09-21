@@ -54,7 +54,7 @@ func TestVerificationProviderPollsServerProvisionedEnvironmentOnRetry(t *testing
 	}
 	request := verificationRequest(t, revision)
 	name := runnable.VerificationEnvironmentName(request.RunnableRevisionRef, request.Attempt)
-	existing := &runtimev2.RuntimeEnvironment{ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID("env-existing")}, Spec: runtimev2.RuntimeEnvironmentSpec{RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: request.RunnableRevisionRef.ID, Digest: request.RunnableRevisionDigest}, Purpose: runtimev2.PurposeVerification}, Status: runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhaseReady, Runtime: runtimev2.RuntimeStatus{Provider: "node", ProfileDigest: digest}}}
+	existing := &runtimev2.RuntimeEnvironment{ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID("env-existing")}, Spec: runtimev2.RuntimeEnvironmentSpec{RunnableRevisionRef: &runtimev2.RunnableRevisionReference{ID: request.RunnableRevisionRef.ID, Digest: request.RunnableRevisionDigest}, Purpose: runtimev2.PurposeVerification}, Status: runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhaseReady, Runtime: runtimev2.RuntimeStatus{Provider: "node", ProfileDigest: digest}}}
 	client := &fakeRuntimeEnvironmentClient{created: existing, getResult: existing}
 	provider, err := NewVerificationProvider(client, client, &fakeNodeRuntimeExecutor{}, "breakfix-system")
 	if err != nil {
@@ -203,7 +203,7 @@ func (c *fakeRuntimeEnvironmentClient) CreateVerificationEnvironment(_ context.C
 	created := c.created.DeepCopy()
 	created.Name = runnable.VerificationEnvironmentName(request.RunnableRevisionRef, request.Attempt)
 	created.Spec = runtimev2.RuntimeEnvironmentSpec{
-		RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: request.RunnableRevisionRef.ID, Digest: request.RunnableRevisionDigest},
+		RunnableRevisionRef: &runtimev2.RunnableRevisionReference{ID: request.RunnableRevisionRef.ID, Digest: request.RunnableRevisionDigest},
 		Purpose:             runtimev2.PurposeVerification,
 	}
 	return created, nil

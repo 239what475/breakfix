@@ -82,7 +82,7 @@ func environmentFixture(name string, purpose runtimev2.EnvironmentPurpose, phase
 			},
 		},
 		Spec: runtimev2.RuntimeEnvironmentSpec{
-			RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: "revision-01", Digest: adminEnvironmentRevisionDigest},
+			RunnableRevisionRef: &runtimev2.RunnableRevisionReference{ID: "revision-01", Digest: adminEnvironmentRevisionDigest},
 			Purpose:             purpose,
 			Lease:               runtimev2.LeaseSpec{RenewedAt: now},
 		},

@@ -98,7 +98,7 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 			if err != nil {
 				return "", fmt.Errorf("resolve runnable revision for environment: %w", err)
 			}
-			environment.Spec.RunnableRevisionRef = runtimev2.RunnableRevisionReference{ID: reference.ID, Digest: reference.Digest}
+			environment.Spec.RunnableRevisionRef = &runtimev2.RunnableRevisionReference{ID: reference.ID, Digest: reference.Digest}
 		}
 		if _, err := h.k8s.CreateRuntimeEnvironment(ctx, h.crdNamespace, environment); err != nil {
 			return "", fmt.Errorf("create runtime environment: %w", err)

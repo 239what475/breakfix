@@ -236,7 +236,7 @@ func testReadyEnvironment(name string) runtimev2.RuntimeEnvironment {
 		ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid"), Labels: map[string]string{
 			"breakfix.dev/user": "u-demo", "breakfix.dev/content-kind": "operations", "breakfix.dev/content-id": "demo", "breakfix.dev/content-revision": testPublishedScenarioRevisionID,
 		}},
-		Spec:   runtimev2.RuntimeEnvironmentSpec{RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: "rr-demo", Digest: testRunnableRevisionDigest}, Purpose: runtimev2.PurposeLearning, Lease: runtimev2.LeaseSpec{RenewedAt: metav1.Now()}},
+		Spec:   runtimev2.RuntimeEnvironmentSpec{RunnableRevisionRef: &runtimev2.RunnableRevisionReference{ID: "rr-demo", Digest: testRunnableRevisionDigest}, Purpose: runtimev2.PurposeLearning, Lease: runtimev2.LeaseSpec{RenewedAt: metav1.Now()}},
 		Status: runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhaseReady, Runtime: runtimev2.RuntimeStatus{Provider: "node"}},
 	}
 }
@@ -278,7 +278,7 @@ func TestConcurrentStartScenarioCreatesOneV2Environment(t *testing.T) {
 	if state.createSuccesses != 1 || len(state.environments) != 1 || state.lastCreated == nil {
 		t.Fatalf("concurrent start created %d environments: %#v", state.createSuccesses, state.environments)
 	}
-	if state.lastCreated.Spec.RunnableRevisionRef != (runtimev2.RunnableRevisionReference{ID: "rr-demo", Digest: testRunnableRevisionDigest}) || state.lastCreated.Spec.Purpose != runtimev2.PurposeLearning {
+	if state.lastCreated.Spec.RunnableRevisionRef == nil || *state.lastCreated.Spec.RunnableRevisionRef != (runtimev2.RunnableRevisionReference{ID: "rr-demo", Digest: testRunnableRevisionDigest}) || state.lastCreated.Spec.Purpose != runtimev2.PurposeLearning {
 		t.Fatalf("created v2 environment spec = %#v", state.lastCreated.Spec)
 	}
 }

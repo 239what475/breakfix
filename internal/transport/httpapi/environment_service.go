@@ -124,10 +124,14 @@ func environmentFromRuntime(environment *runtimev2.RuntimeEnvironment) *activeEn
 		phase = runtimev2.PhasePending
 	}
 	labels := environment.Labels
+	runnableRevisionID, runnableRevisionDigest := "", ""
+	if environment.Spec.RunnableRevisionRef != nil {
+		runnableRevisionID, runnableRevisionDigest = environment.Spec.RunnableRevisionRef.ID, environment.Spec.RunnableRevisionRef.Digest
+	}
 	active := &activeEnvironment{
 		UID: string(environment.UID), Runtime: runtimeName, Name: environment.Name,
 		UserID: labels["breakfix.dev/user"], ScenarioRef: labels["breakfix.dev/content-id"], SourceRevision: labels["breakfix.dev/content-revision"],
-		RunnableRevisionID: environment.Spec.RunnableRevisionRef.ID, RunnableRevisionDigest: environment.Spec.RunnableRevisionRef.Digest,
+		RunnableRevisionID: runnableRevisionID, RunnableRevisionDigest: runnableRevisionDigest,
 		Blank:   environment.Spec.BlankRuntime != nil,
 		Purpose: environment.Spec.Purpose, Phase: phase, Operation: environment.Status.Operation, Deleting: environment.DeletionTimestamp != nil,
 	}
@@ -447,12 +451,15 @@ func (h *Handler) waitEnvironmentReady(ctx context.Context, runtime, name string
 }
 
 func environmentMatchesTarget(environment *activeEnvironment, userID string, target environmentContentTarget) bool {
+	// An environment still provisioning projects no runtime provider yet; it
+	// matches any target whose identity fences it, so concurrent creators
+	// adopt it instead of rejecting the race.
 	return environment != nil && target.id != "" &&
 		environment.UserID == userID &&
 		environment.Purpose == runtimev2.PurposeLearning &&
 		environment.ScenarioRef == target.id &&
 		environment.SourceRevision == target.revisionID &&
-		environment.Runtime == target.runtime &&
+		(environment.Runtime == target.runtime || environment.Runtime == "") &&
 		environment.Blank == target.blank
 }
 

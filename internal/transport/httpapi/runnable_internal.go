@@ -188,7 +188,7 @@ func (h *Handler) InternalCreateRunnableVerificationEnvironment(c *gin.Context) 
 	environment := &runtimev2.RuntimeEnvironment{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: runtimev2.RuntimeEnvironmentSpec{
-			RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: request.Request.RunnableRevisionRef.ID, Digest: request.Request.RunnableRevisionDigest},
+			RunnableRevisionRef: &runtimev2.RunnableRevisionReference{ID: request.Request.RunnableRevisionRef.ID, Digest: request.Request.RunnableRevisionDigest},
 			Purpose:             runtimev2.PurposeVerification,
 			Lease:               runtimev2.LeaseSpec{RenewedAt: metav1.NewTime(now)},
 		},

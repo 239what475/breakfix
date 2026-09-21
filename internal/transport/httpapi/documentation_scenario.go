@@ -46,6 +46,31 @@ func (h *Handler) blankScenarioTarget(c *gin.Context) (environmentContentTarget,
 	}, true
 }
 
+// findBlankScenarioEnvironment resolves the reader's blank session by its
+// deterministic name. The label-based findEnvironment cannot see a session
+// while it is still provisioning: the runtime provider projection is empty
+// until the controller's first observation, and the shared list filters on
+// it. The name is the ownership fence, so a direct read plus an identity
+// check is exact.
+func (h *Handler) findBlankScenarioEnvironment(ctx context.Context, userID string, target environmentContentTarget) (*activeEnvironment, error) {
+	adapter, err := h.environmentRuntimeAdapter(target.runtime)
+	if err != nil {
+		return nil, err
+	}
+	env, err := adapter.get(ctx, learningEnvironmentName(userID, target))
+	if apierrors.IsNotFound(err) {
+		return nil, errNoMatchingEnvironment
+	}
+	if err != nil {
+		return nil, err
+	}
+	if env.Deleting || !isLiveEnvironmentPhase(env.Phase) ||
+		env.UserID != userID || env.ScenarioRef != target.id || env.SourceRevision != target.revisionID || !env.Blank {
+		return nil, errNoMatchingEnvironment
+	}
+	return env, nil
+}
+
 // blankScenarioState projects the session state machine the toolbar renders:
 // none → creating → ready, reset returning to creating, failure staying
 // retryable, and lifecycle reclamation reading as none.
@@ -91,10 +116,22 @@ func (h *Handler) GetDocumentationScenario(c *gin.Context) {
 	if !ok {
 		return
 	}
-	env, err := h.findEnvironment(c.Request.Context(), user.ID, target)
+	env, err := h.findBlankScenarioEnvironment(c.Request.Context(), user.ID, target)
 	if err != nil && !errors.Is(err, errNoMatchingEnvironment) {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("find blank scenario: %v", err)})
 		return
+	}
+	// A reader polling a still-preparing session is actively watching it:
+	// renew the idle lease so slow provisioning cannot starve the session
+	// before its first readiness. The adapter resolves from the target's
+	// runtime because an unprovisioned environment projects no runtime
+	// provider yet. Ready sessions renew only through real use (terminal
+	// attach or an explicit start), keeping the idle TTL meaningful. A failed
+	// renewal never fails the read.
+	if env != nil && (env.Phase == runtimev2.PhasePending || env.Phase == runtimev2.PhaseProvisioning || env.Operation == runtimev2.OperationResetting) {
+		if adapter, adapterErr := h.environmentRuntimeAdapter(target.runtime); adapterErr == nil {
+			_ = adapter.renewActivity(c.Request.Context(), env.Name, nowActivity())
+		}
 	}
 	c.JSON(http.StatusOK, blankScenarioResponse(env))
 }
@@ -111,7 +148,7 @@ func (h *Handler) StartDocumentationScenario(c *gin.Context) {
 	if !ok {
 		return
 	}
-	env, err := h.findEnvironment(c.Request.Context(), user.ID, target)
+	env, err := h.findBlankScenarioEnvironment(c.Request.Context(), user.ID, target)
 	if err != nil && !errors.Is(err, errNoMatchingEnvironment) {
 		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("find blank scenario: %v", err)})
 		return
@@ -197,7 +234,7 @@ func (h *Handler) ResetDocumentationScenario(c *gin.Context) {
 	if !ok {
 		return
 	}
-	env, err := h.findEnvironment(c.Request.Context(), user.ID, target)
+	env, err := h.findBlankScenarioEnvironment(c.Request.Context(), user.ID, target)
 	if err != nil {
 		if errors.Is(err, errNoMatchingEnvironment) {
 			c.JSON(http.StatusConflict, api.ErrorResponse{Error: "no active blank scenario to reset"})
@@ -243,7 +280,7 @@ func (h *Handler) StopDocumentationScenario(c *gin.Context) {
 	if !ok {
 		return
 	}
-	env, err := h.findEnvironment(c.Request.Context(), user.ID, target)
+	env, err := h.findBlankScenarioEnvironment(c.Request.Context(), user.ID, target)
 	if err != nil {
 		if errors.Is(err, errNoMatchingEnvironment) {
 			c.JSON(http.StatusOK, api.DocumentationScenarioCloseResponse{Closed: true})

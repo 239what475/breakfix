@@ -63,7 +63,7 @@ func (p Plan) Digest() (string, error) {
 func ValidateSpec(environment runtimev2.RuntimeEnvironment, plan Plan) error {
 	if plan.Blank == nil {
 		ref := environment.Spec.RunnableRevisionRef
-		if strings.TrimSpace(ref.ID) == "" || !runnable.ValidDigest(ref.Digest) {
+		if ref == nil || strings.TrimSpace(ref.ID) == "" || !runnable.ValidDigest(ref.Digest) {
 			return errors.New("runtime environment has an invalid runnable revision reference")
 		}
 		if err := plan.Revision.Validate(); err != nil {

@@ -187,7 +187,11 @@ var errBlankRuntimeNotInstalled = errors.New("blank runtime has no installed pla
 // blank plan for blank ones.
 func (r *Reconciler) resolvePlan(ctx context.Context, environment *runtimev2.RuntimeEnvironment) (Plan, error) {
 	if environment.Spec.BlankRuntime == nil {
-		revision, err := r.Resolver.ResolveRunnableRevision(ctx, environment.Spec.RunnableRevisionRef.ID, environment.Spec.RunnableRevisionRef.Digest)
+		ref := environment.Spec.RunnableRevisionRef
+		if ref == nil {
+			return Plan{}, errBlankRuntimeNotInstalled
+		}
+		revision, err := r.Resolver.ResolveRunnableRevision(ctx, ref.ID, ref.Digest)
 		if err != nil {
 			return Plan{}, err
 		}

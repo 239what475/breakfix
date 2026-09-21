@@ -461,7 +461,7 @@ func testRuntimeEnvironment(name string, phase runtimev2.EnvironmentPhase) runti
 		ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid"), Labels: map[string]string{
 			"breakfix.dev/user": "u-demo", "breakfix.dev/content-kind": "operations", "breakfix.dev/content-id": "demo", "breakfix.dev/content-revision": testPublishedScenarioRevisionID,
 		}},
-		Spec:   runtimev2.RuntimeEnvironmentSpec{RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: "rr-demo", Digest: testRunnableRevisionDigest}, Purpose: runtimev2.PurposeLearning, Lease: runtimev2.LeaseSpec{RenewedAt: metav1.Now()}},
+		Spec:   runtimev2.RuntimeEnvironmentSpec{RunnableRevisionRef: &runtimev2.RunnableRevisionReference{ID: "rr-demo", Digest: testRunnableRevisionDigest}, Purpose: runtimev2.PurposeLearning, Lease: runtimev2.LeaseSpec{RenewedAt: metav1.Now()}},
 		Status: runtimev2.RuntimeEnvironmentStatus{Phase: phase, Runtime: runtimev2.RuntimeStatus{Provider: "node"}},
 	}
 }

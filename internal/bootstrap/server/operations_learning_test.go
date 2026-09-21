@@ -81,7 +81,7 @@ func operationsLearningEnvironment(revisionDigest, profileDigest string) runtime
 	return runtimev2.RuntimeEnvironment{
 		ObjectMeta: metav1.ObjectMeta{UID: types.UID("environment-01"), Labels: map[string]string{"breakfix.dev/content-kind": "operations"}},
 		Spec: runtimev2.RuntimeEnvironmentSpec{
-			RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: "rr-demo", Digest: revisionDigest}, Purpose: runtimev2.PurposeLearning,
+			RunnableRevisionRef: &runtimev2.RunnableRevisionReference{ID: "rr-demo", Digest: revisionDigest}, Purpose: runtimev2.PurposeLearning,
 		},
 		Status: runtimev2.RuntimeEnvironmentStatus{
 			Phase: runtimev2.PhaseReady,

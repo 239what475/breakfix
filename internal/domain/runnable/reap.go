@@ -59,6 +59,16 @@ func (b EnvironmentBinding) Digest() (string, error) {
 	return b.RunnableRevision.Digest()
 }
 
+// Lifecycle is the frozen policy of whichever plan arm the binding carries.
+// A blank binding has a zero runnable revision; reading its policy directly
+// would yield zero timeouts and expire every operation immediately.
+func (b EnvironmentBinding) Lifecycle() LifecyclePolicy {
+	if b.BlankRuntime != nil {
+		return b.BlankRuntime.Lifecycle
+	}
+	return b.RunnableRevision.Spec.LifecyclePolicy
+}
+
 // ReapRequest is immutable once enqueued. UID and revision digest fence the
 // request to one concrete provider resource set, even when a name is reused.
 type ReapRequest struct {

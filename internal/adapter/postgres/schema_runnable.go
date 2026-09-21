@@ -70,7 +70,10 @@ var schemaRunnableStatements = []string{
 	`CREATE INDEX runnable_actions_claim ON runnable_actions (state, next_run_at, lease_expires_at, created_at, action_key)`,
 	`CREATE TABLE runnable_reaps (
 		reap_key TEXT PRIMARY KEY,
-		runnable_revision_digest TEXT NOT NULL REFERENCES runnable_revisions(runnable_revision_digest) ON DELETE RESTRICT,
+		-- The digest fences one concrete resource set: a runnable revision
+		-- digest for content environments, the blank plan digest for blank
+		-- ones. No foreign key: blank digests have no runnable_revisions row.
+		runnable_revision_digest TEXT NOT NULL,
 		reap_request JSONB NOT NULL,
 		state TEXT NOT NULL CHECK (state IN ('queued', 'claimed', 'succeeded')),
 		attempt BIGINT NOT NULL DEFAULT 0 CHECK (attempt >= 0),

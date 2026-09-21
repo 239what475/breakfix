@@ -17,7 +17,7 @@ type LearningHistory = {
 	scenario: { id: string; runtime: "node" | "k8s" };
 };
 
-async function totpCode(page: Page, secret: string): Promise<string> {
+export async function totpCode(page: Page, secret: string): Promise<string> {
   return page.evaluate(async (value: string) => {
     const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
     const bytes: number[] = [];

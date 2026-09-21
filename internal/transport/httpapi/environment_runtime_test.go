@@ -53,7 +53,7 @@ func TestEnvironmentFromRuntimeMapsGenericProviderState(t *testing.T) {
 				"breakfix.dev/content-id": "demo", "breakfix.dev/content-revision": "chrev-aaaaaaaaaaaaaaaa",
 			},
 		},
-		Spec: runtimev2.RuntimeEnvironmentSpec{RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: "rrev-demo", Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, Purpose: runtimev2.PurposeLearning},
+		Spec: runtimev2.RuntimeEnvironmentSpec{RunnableRevisionRef: &runtimev2.RunnableRevisionReference{ID: "rrev-demo", Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, Purpose: runtimev2.PurposeLearning},
 		Status: runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhaseReady, Runtime: runtimev2.RuntimeStatus{
 			Provider: "k8s", ResourceRefs: []runtimev2.ResourceReference{{Provider: "k8s", Kind: "namespace", ID: "runtime-demo"}, {Provider: "k8s", Kind: "pod", ID: "runtime-demo/terminal"}},
 			EndpointRefs: []runtimev2.EndpointReference{{Name: "terminal", Ref: "runtime-demo/terminal"}},

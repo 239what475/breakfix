@@ -26,7 +26,7 @@ func TestListRuntimeEnvironmentsConvertsV2Items(t *testing.T) {
 			Items: []runtimev2.RuntimeEnvironment{{
 				ObjectMeta: metav1.ObjectMeta{Name: "environment-01"},
 				Spec: runtimev2.RuntimeEnvironmentSpec{
-					RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: "revision-01", Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+					RunnableRevisionRef: &runtimev2.RunnableRevisionReference{ID: "revision-01", Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 					Purpose:             runtimev2.PurposeLearning,
 					Lease:               runtimev2.LeaseSpec{RenewedAt: metav1.Now()},
 				},

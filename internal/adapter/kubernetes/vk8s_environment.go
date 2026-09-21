@@ -234,10 +234,22 @@ func (p *vk8sEnvironmentProvider) ensureNamespace(ctx context.Context, request e
 }
 
 func verifyVK8sNamespaceOwner(namespace *corev1.Namespace, request environment.VK8sProvisionRequest) error {
-	if namespace == nil || namespace.Annotations[vk8sEnvironmentUIDAnnotation] != request.EnvironmentUID || namespace.Annotations[vk8sEnvironmentRevisionAnnotation] != request.Revision || namespace.Labels[vk8sRuntimeLabel] != vk8sRuntimeLabelValue {
+	if namespace == nil || namespace.Annotations[vk8sEnvironmentUIDAnnotation] != request.EnvironmentUID || !vk8sRevisionFenceSatisfied(namespace, request) || namespace.Labels[vk8sRuntimeLabel] != vk8sRuntimeLabelValue {
 		return fmt.Errorf("VK8s namespace %q has different ownership metadata", request.Identity.Namespace)
 	}
 	return nil
+}
+
+// vk8sRevisionFenceSatisfied compares the frozen revision annotation with the
+// request's fence. Blank release is identity-driven and carries no digest, so
+// the plan digest drifted across a controller upgrade must not block cleanup;
+// the environment UID annotation remains the fence. Provision and reset keep
+// the strict comparison: they always carry the digest they must match.
+func vk8sRevisionFenceSatisfied(namespace *corev1.Namespace, request environment.VK8sProvisionRequest) bool {
+	if request.Blank && request.Revision == "" {
+		return true
+	}
+	return namespace.Annotations[vk8sEnvironmentRevisionAnnotation] == request.Revision
 }
 
 func vclusterNamespaceOwnershipCompatible(namespace *corev1.Namespace, request environment.VK8sProvisionRequest) bool {

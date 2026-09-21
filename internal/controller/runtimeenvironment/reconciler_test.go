@@ -56,7 +56,12 @@ func (p *reconcilerProvider) Reset(_ context.Context, binding Binding) (Observat
 	return p.reset, p.resetErr
 }
 
-func (p *reconcilerProvider) Release(_ context.Context, binding Binding) (bool, error) {
+func (p *reconcilerProvider) Release(ctx context.Context, binding Binding) (bool, error) {
+	// An operation context that is already expired must surface as an error,
+	// exactly like a real provider request would.
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	p.releaseCalls++
 	p.lastRelease = binding
 	return p.releaseDone, p.releaseErr
@@ -257,7 +262,7 @@ func testRuntimeEnvironment(t *testing.T, revision runnable.RunnableRevision, ph
 	return &runtimev2.RuntimeEnvironment{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "breakfix-system", Name: "runtime-environment", UID: types.UID("runtime-environment-uid"), CreationTimestamp: metav1.NewTime(createdAt)},
 		Spec: runtimev2.RuntimeEnvironmentSpec{
-			RunnableRevisionRef: runtimev2.RunnableRevisionReference{ID: "revision-01", Digest: digest},
+			RunnableRevisionRef: &runtimev2.RunnableRevisionReference{ID: "revision-01", Digest: digest},
 			Purpose:             runtimev2.PurposeVerification,
 			Lease:               runtimev2.LeaseSpec{RenewedAt: metav1.NewTime(createdAt)},
 		},
