@@ -1,83 +1,76 @@
 # TODO
 
-已完成的阶段见 git 历史(最近:门禁拒绝自动重试状态机与反馈回灌见 cfc5c9d/956f401;fixture 退役与 reviewer 契约修复见 119f034;docs 上游 canary 与发布前收尾见 dc85e1d;PR 门禁与 Dependabot 自动合并见 3b2c47d);本文件保留当前阶段与未立项事项。
+已完成的阶段见 git 历史(最近:文档门禁自动重试三笔 cfc5c9d/956f401/c0d65e5 与更早的文档管线建设——**产品方向已于 2026-09-21 变更,文档侧不再生成实践,全部相关代码在删除提交中移除**;fixture 退役与 reviewer 契约见 119f034;docs canary 与收尾见 dc85e1d);本文件保留当前阶段与未立项事项。
 
-## 状态机统一 U2:文档工作流并入 generation 机器(当前阶段,2026-09-21 立项,2026-09-21 与用户确认方案)
+## 阶段:文档空白实践场景(2026-09-21 定案,本文件即执行计划)
 
-背景:门禁拒绝自动重试机器落地后,live 验收暴露生成质量根因——文档侧生成是"盲写单发 + 盲审 + 验证失败即终态",而运维侧 GenerationWorkflow 的生成是"工作区真实执行 + 自验 + 三层带反馈回灌"。与用户确认:**两边 agent workflow 大部分公用,只是入口不同;采用 U2 深度——两套状态机合一,文档入口插件化**(否决了两条更浅路径:平行新建文档工作区机器,以及仅挂行复用工作区)。
+### 0. 定案原则(与用户逐条确认)
 
-架构定稿:
+1. **文档不生成任何实践**。文档页面本身是教材;系统只提供"场地"——每用户一个空白 vk8s 场景,用户照文档自己操作。生成管线、judge、反馈回灌、发布语料、批次——整个问题域取消。
+2. **无锚点**。练习场是页面级甚至站点级的东西,不按章节切分。
+3. **每用户一个场景(方案 A)**:钉住库范围内全局唯一,跨页面携带;任何文档页右侧工具栏显示同一状态、操作同一实例。配额即"每人 1 个";要干净开始用"重置",不是换页新建。
+4. **不建模为目录 scenario**:空白场景就是 RuntimeEnvironment + 终端会话,不进 scenarios 目录、没有 runnable 修订、没有发布语义。
+5. **全部复用现有机器**:创建=RuntimeEnvironment 供给(vk8s provider),关闭=Stop/Release,重置=Reset(controller 调和器现有动词);终端 attach 复用实践会话机器(改绑用户);空闲 TTL/最长存活回收兜底,显式关闭是用户主动清理。
+6. **暂时只提供 vk8s 场景**;node/Incus 以后需要再加。
+7. **删除一次性完成**:旧文档生成世界在单个提交内删净,任何时刻只有一套实现;不做并行、不做兼容层。
 
-- **一个状态机、一张权威表(generation_workflows)、一套驱动循环;文档与 authoring 是两个 source 插件**;
-- 统一状态集 14 态:运维 9 态 + 文档缺的相(Planning/PlanReviewing/VerificationReviewing/NoPractice/Rejected);迁移合法性从"repository WHERE 谓词分散"集中为域内迁移白名单(还运维侧结构债);
-- 文档入口:IgnitionDispatcher/批次 ignite 驱动 planner+plan 门禁,门禁拒→AutoRestart 回 Planning(预算内,本阶段已建机器保留);
-- Generating 两入口同形 = **GeneratorService 工作区回合**(PVC/沙箱/快照/Reaper 全套直用);文档生成 Agent 经 GeneratorOperations 端口驱动,提交入口为文档形状(工作区归档→CompileCandidate,agent 只交 execution plan,杜绝测一套交一套)+ `verify_draft` 真环境自验(dry-run 走 RunnableStore 仓库层,StateVersion=0 不 Bind,脱离 watchdog/Reconcile;env 由现有 controller/reaper 回收);
-- Judging = AgentRunner 租约认领(扩为 purpose→executor 注册表):文档注册双角色门禁 Judge(plan/candidate)与验证评审 Judge;运维 Judge 原样;
-- Materializing/Verifying = 公共 runnable 队列,RunnableCoordinator 替代文档 Reconcile 出站箱;文档 Bind 语义并入;
-- 回灌统一带反馈:authoring 读 last_error(无界,行为不变);文档从账本 pipeline.auto_restart 取,预算 MaxRevisions=3;**验证失败也回灌**(Gate="verification",对齐运维 :551 语义);
-- Publishing:运维 PublicationFinalizer 模式 + 文档 Publish finalizer 插件(发布校验/PracticeRevision/practice index/reader projection 原样);
-- 表策略:权威迁 generation_workflows,文档页身份/预算入 document_workflow_details 扩展表;**旧 document_workflows 转 SQL VIEW**——e2e 14+ 处直查断言、已发布锚点、批次/管理读模型零改动兼容(spec 改写列后续);管理 API/Prometheus/前端状态名经映射层保持对外不变。
+### 1. 契约定稿
 
-提交拆解:
+- **绑定键**:`(user_id, 库钉住身份)`——库钉住身份取 library PinnedContext 的 `source_id+commit+language`(整个库一个钉住版本,不含页面)。RuntimeEnvironment 命名确定性派生自绑定键,重建幂等(同键 AlreadyExists 则收养,同运维验证环境先例)。
+- **状态机(会话级,非工作流)**:`None → Creating → Ready → (Reset→Creating | Closed→None)`;供给失败落 `Failed`(可重试创建)。TTL 到期回收视为回到 None。状态查询走现有环境读模型。
+- **API(登录用户)**:
+  - `GET  /api/documentation/scenario` → `{state: none|creating|ready|failed, environment_id?}`;
+  - `POST /api/documentation/scenario` → 创建(幂等:已有非终态即返回现状;Failed/None 可重建);
+  - `POST /api/documentation/scenario/reset` → Ready 态专用(Reset 后回 Creating);
+  - `DELETE /api/documentation/scenario` → 关闭释放(Stop+Release)。
+  - openapi 同步再生成(`make generate`)。
+- **终端**:`POST /api/documentation/scenario/terminal`(或复用现有 attach 端点改绑)——Ready 后可 attach,面板复用现实践面板的终端组件。
+- **配额与生命周期**:每用户每库 1 个并发环境(CREATE 遇存量非终态返回现状);空闲 TTL/最长存活沿用现有 LifecyclePolicy(配置沿用实践环境既有值);重置不清 TTL 计时(Reset 后重新计)。
+- **前端**:文档页右侧**竖向工具栏**(创建/重置/关闭三按钮 + 状态徽标),全页面同一实例状态;实践面板改造为"空白场景终端面板"(去步骤/结论区)。
+- **admin**:保留环境与队列观测(现 admin 队列面);工作流/批次/语料观测随删除消失。
 
-### 提交 0 live 基座(异步点火与窗口)
+### 2. 提交 1:空白场景后端
 
-- [x] 点火端点 202 异步:AgentPipeline.Prepare + IgnitionDispatcher 后台驱动链路并按工作流去重(live 单轮链路 5 分钟以上,同步 POST 连一轮都装不下——live 套件从未绿过的根因);
-- [x] spec 2 ensurePracticePublished 死代码修复(首注册即 bootstrap admin 的选举语义,否则按角色断言明确失败,不再 403 迷雾);
-- [x] 轮询终态快速失败(awaitWorkflowState:落定集=接受集∪终态)+ 等待窗按 max_revisions 全预算放大(30 分钟档);
-- [x] 模型单请求超时 5m→15m(推理模型补全可超 5m,重试耗尽即链路放弃,live 实测);
-- [x] 指令修正:planner 澄清"agent 自身无集群访问 ≠ 实践不能用隔离 k8s 集群"(live 曾因此直接弃做);generator 补运行时契约事实(/bin/bash 执行、归档路径、kubectl 在标准 PATH,live 曾捏造绝对路径致 exit 127)。
+- [ ] `internal/application/`新建空白场景服务(建议 `documentscenarios/`):绑定键解析、三动词(创建/重置/关闭)映射到 EnvironmentProvider 的 Provision/Reset/Stop+Release、状态读、每用户唯一约束(确定性环境名+收养语义);
+- [ ] 传输层:§1 四个端点 + openapi 再生成;读者登录态鉴权(与现实践会话一致);
+- [ ] bootstrap:服务装配(复用现有 k8s EnvironmentProvider/controller/LifecyclePolicy);
+- [ ] 单测:服务状态机(None→Creating→Ready;Reset;Closed;Failed 重建;幂等创建;配额 1)——用假 provider;handler 测试(含未登录/状态冲突);
+- 验证:`make test-unit`;`make verify-generated`;`make lint`。
 
-### 提交 1 域统一
+### 3. 提交 2:前端工具栏与面板改绑
 
-- [ ] generation 状态集扩 14 态 + 集中迁移白名单(单测:全迁移矩阵);
-- [ ] source_kind 加 'documentation'(schema CHECK 与域);归属谓词按 source 分派(documentation owner=文档工作流存在,类比 release 无 owner);
-- [ ] SubmitCandidate 按 source 分派;generation 既有测试全绿。
+- [ ] 文档页右侧竖向工具栏组件(三按钮+状态徽标,按 GET 状态渲染;Creating 轮询到 Ready);
+- [ ] 终端面板改绑空白场景(去实践步骤/结论渲染);移除锚点实践按钮与"已发布实践"查询;
+- [ ] web 组件测:工具栏状态渲染、按钮可用性矩阵(none/creating/ready/failed)、面板 attach;
+- 验证:`make web-test-unit`。
 
-### 提交 2 权威迁移
+### 4. 提交 3:旧文档生成世界一次性删除
 
-- [ ] documentpractice Store 状态方法改由 generation 仓库泛化实现;workflow id 沿用 `"document-workflow-"+ContentID` 作 generation 行主键(批次绑定零迁移);
-- [ ] document_workflow_details 扩展表(页身份 + max_revisions);document_workflows 转 VIEW(generation JOIN details);
-- [ ] watchdog/批次/观察/admin 队列读模型三处 JOIN 迁到权威表;document_runnable_actions.state_version 对齐权威表;StateVersion-1 不变量测试先行;
-- [ ] 管理 API 状态名映射层(对外文档状态名不变);Prometheus/前端经视图与映射不动;documentpractice/generation/transport 单测 + web 组件测全绿。
+- [ ] **Go**:`internal/domain/documentpractice/`、`internal/application/documentpractice/`(全部:agent_pipeline/service/batch/batch_scheduler/watchdog/pipeline/candidate_generation/orchestrator/boundary/ignition)、`internal/adapter/llm/documentpractice.go`、`internal/adapter/postgres/documentpractice_repository.go`+`schema_documentpractice.go`、transport 的 documentation 点火/admin 工作流与批次与语料端点、bootstrap 的文档管线与批次装配;`document_batches`/`document_batch_items` 表及仓库方法一并删除;
+- [ ] **保留**:docs-site 库与页面渲染服务、读者 API、RuntimeEnvironment/controller/vk8s provider、runnable 公共队列(运维场景仍用)、admin 环境与队列观测、`config/app` 的 request_timeout 15m(通用 agent 配置);
+- [ ] **web**:admin 语料/批次/工作流页面与组件、12 态梯子、相关 API client 方法删除;
+- [ ] **e2e 同提交改写**:`test/documentation/` 重写为空白场景套件(创建→Ready→终端输入→重置→关闭;TTL 兜底不测时长只测动词);`test/admin/` 的 batch-rollout/watchdog-controls/workflow-rescue 三套件删除(其对象已不存在),admin.setup 与 auth_flow 中文档点火用例改写;`RUN_AGENT_LIVE_E2E` 门对文档侧取消(不再依赖模型);
+- [ ] 删除后全仓编译、全量单测、web 测、`make verify-generated` 绿。
+- 验证:`make test-unit`;`make web-test-unit`;`make verify-generated`;`make lint`。
 
-### 提交 3 工作区生成
+### 5. 提交 4:验收收口
 
-- [ ] GeneratorService 守卫泛化(source 分派落地);文档生成 Agent:GeneratorOperations 工作区五件套子集 + submit_practice_blueprint(归档编译)+ 照 authoring executor 骨架(authoringTool/toolresult/invalidToolInput 同对话自修正);
-- [ ] 实现 BlueprintGenerator/FeedbackBlueprintGenerator 既有接口(管线与测试假件零改动);bootstrap 与 authoring 共享同一 GeneratorService 实例;
-- [ ] 假工作区单测:写入/执行回灌/提交取归档。
+- [ ] e2e(Kind 目标):`make test-e2e-documentation`(新空白场景套件)全绿;admin 剩余套件绿;快车道(`make test-unit`/`test-race`/`web-test-unit`/`verify-generated`)与 nightly 绿;
+- [ ] TODO 收口章:方向变更决策记录(为什么放弃生成)、删除清单摘要、验收证据。
 
-### 提交 4 评审统一 + 自验 + 验证回灌
+### 6. 风险与对策
 
-- [ ] AgentRunner purpose→executor 注册表;文档双角色门禁 Judge 与验证评审 Judge 挂入;
-- [ ] verify_draft 工具(dry-run,StateVersion=0 不 Bind);spec 的 runnable_actions 轮询改经 document_runnable_actions JOIN(dry-run 行不再干扰);
-- [ ] 验证失败回灌:AutoRestart 复用(Gate="verification",reasons 取报告摘要),反馈从 pipeline.auto_restart 账本推导(含崩溃恢复);预算耗尽落 Failed 终态;
-- [ ] 单测:验证失败→回灌→重试发布 / 预算耗尽终态 / 批次与直发两路再驱动。
+- **环境成本**:每活跃读者一个 vcluster;空闲 TTL+最长存活兜底,必要时后续加全站并发上限(配置项,后续项);
+- **Reset 语义**:确认 provider Reset 对 vk8s 是"清空重建 vcluster 数据"而非只重启(实现第一步核实,不符则 Reset=Release+Provision);
+- **删除破坏面**:单提交原子完成可整体 revert;e2e 与 web 同提交改写保证仓库任何提交点全绿;
+- **状态轮询**:Creating 阶段前端轮询 GET;后端不引入新推送机制。
 
-### 提交 5 live 验收收口(承接原阶段遗留项)
+### 7. 已知后续(不属本阶段)
 
-- [ ] RUN_AGENT_LIVE_E2E=1 make test-e2e-documentation 全绿(发布经重试轮次收敛);
-- [ ] RUN_AGENT_LIVE_E2E=1 make test-e2e-admin 全绿;
-- [ ] 快车道/nightly 绿;TODO.md 阶段收口(记录统一决策与验收章)。
-
-### 横切风险对策
-
-- state_version 三方对齐(watchdog/观察/绑定)→ 绑定表指权威表,不变量测试先行;
-- 审计/账本 payload 状态字面量与 Prometheus 12 态、前端 STAGE_STATES → 映射层原样保留;
-- e2e 直查 → VIEW 兼容(spec 改写为后续独立项);
-- lease 不变式扩展为"lease ⟺ 被认领相"(文档入口/评审相不经 lease,队列相走公共队列);
-- 运维回灌维持无界(不给 authoring 加预算,行为不变更);文档账本保留(审计支柱)。
-
-### 已知后续(不属本阶段)
-
-- 工作区崩溃孤儿沙箱/PVC 的账本记录 + 启动清扫;e2e spec 直查改写(脱离 VIEW);
-- js-yaml ×3 告警等 Dependabot 分组更新;ollama critical 无上游修复版;#15 typescript 7 等 vue-tsc 跟进;
+- node/Incus 空白场景类型;全站并发上限配置;终态断言(学习闭环)若做另行立项;
+- 工作区崩溃孤儿沙箱/PVC 清扫(authoring 侧遗留);js-yaml ×3 等 Dependabot;ollama critical 无上游修复;#15 typescript 7 等 vue-tsc 跟进;
 - 首次真实发布后部署侧验证无凭证直拉。
-
-## 文档管线门禁拒绝自动重试(前一阶段,收口并入 U2 提交 0/5)
-
-状态机(拒绝→有界自动重启,cfc5c9d)与反馈回灌(956f401)已提交;live 验收两项与 spec 2 死代码修复作为前置并入上方 U2 的提交 0(已完成,待提交)与提交 5。阶段背景与决策见 8bfa990 的 TODO 版本。
 
 ## 挂起待决策(不排期)
 
-- **内容治理/紧急下架**:场景侧非 authoring 内容无法下架、无管理员覆盖;实践内容 PracticeRevision 一侧 append-only(索引只进不改)是刻意设计,与"紧急摘除"冲突。若做,方向是索引摘除/tombstone 而非删除数据——独立设计决策后另行立项,当前不做。
+- **内容治理/紧急下架**:场景侧非 authoring 内容无法下架、无管理员覆盖;索引 append-only 是刻意设计,与"紧急摘除"冲突。若做,方向是索引摘除/tombstone 而非删除数据——独立设计后另行立项,当前不做。
