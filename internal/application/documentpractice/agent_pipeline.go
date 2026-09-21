@@ -115,6 +115,24 @@ type PipelineStartResult struct {
 	MaterializationAction runnable.ActionIdentity
 }
 
+// Prepare validates the requested page/anchor and creates the workflow with
+// its page identity and the administrative ignition audit durably - without
+// running any Agent work. The chain itself is a separate Start invocation:
+// asynchronous ignitions (the HTTP endpoint) Prepare durably, acknowledge with
+// the workflow's state, and drive Start on a background goroutine, exactly
+// like the batch scheduler's ignite.
+func (p *AgentPipeline) Prepare(ctx context.Context, workflowID, pagePath, anchor string, ignition *audit.HumanAction) (domain.Workflow, error) {
+	metadata, err := p.reader.ReadMetadata(pagePath)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	if !metadataContainsAnchor(metadata, anchor) {
+		return domain.Workflow{}, errors.New("documentation anchor is absent from the pinned page")
+	}
+	identity := domain.WorkflowPageIdentity{SourceID: metadata.Context.SourceID, Commit: metadata.Context.Commit, Language: metadata.Context.Language, PagePath: pagePath, Anchor: anchor}
+	return p.service.Start(ctx, workflowID, identity, ignition)
+}
+
 // Start reads exactly one requested page/anchor and runs planning, independent
 // review, generation, independent artifact review, and deterministic gates.
 // It stops before Provider work and returns the immutable materialization key.

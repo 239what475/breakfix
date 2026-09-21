@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
-  apiBase,
+  awaitWorkflowState,
+  igniteDocumentationPractice,
   autoscaleAnchor,
   autoscalePage,
   ingressPage,
@@ -20,20 +21,16 @@ import { createBatch, getBatch } from "../support/batch";
 // A re-run against a target where ingress is already published can only
 // re-verify the skip semantics; the scheduler-chain assertions are gated.
 test("documentation batches schedule, publish, skip, and roll up the corpus", async ({ page, request }) => {
-  test.setTimeout(20 * 60_000);
+  test.setTimeout(50 * 60_000);
   const token = await loginBootstrapAdmin(request);
 
   await scaleRuntimeWorker(1);
-  const prestart = await request.post(`${apiBase}/api/documentation/practice`, {
-    headers: { Authorization: `Bearer ${token}` },
-    data: { page_path: autoscalePage, anchor: autoscaleAnchor },
-  });
+  const prestart = await igniteDocumentationPractice(request, token, autoscalePage, autoscaleAnchor);
   expect(prestart.status(), await prestart.text()).toBe(202);
   const prestarted = await prestart.json() as { workflow_id: string };
-  await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${prestarted.workflow_id}'`), {
-    timeout: 10 * 60_000,
-    intervals: [2_000, 5_000, 10_000],
-  }).toBe("Published");
+  await awaitWorkflowState(
+    () => postgres(`SELECT state FROM document_workflows WHERE id = '${prestarted.workflow_id}'`),
+    /(Published)/, 30 * 60_000);
 
   const ingressPublished = await postgres(`SELECT COUNT(*) FROM document_workflows WHERE page_path = '${ingressPage}' AND anchor = '${ingressTerminologyAnchor}' AND state = 'Published'`);
   const freshTarget = Number(ingressPublished) === 0;
@@ -45,7 +42,7 @@ test("documentation batches schedule, publish, skip, and roll up the corpus", as
   await expect.poll(async () => {
     const current = await getBatch(request, token, batch.id);
     return `${current.state}:${current.counts?.Failed ?? 0}`;
-  }, { timeout: 15 * 60_000, intervals: [3_000, 5_000, 10_000] }).toBe("Completed:0");
+  }, { timeout: 35 * 60_000, intervals: [3_000, 5_000, 10_000] }).toBe("Completed:0");
   const finished = await getBatch(request, token, batch.id);
   expect(finished.counts?.Skipped ?? 0).toBe(freshTarget ? 1 : 2);
   expect(finished.counts?.Published ?? 0).toBe(freshTarget ? 1 : 0);

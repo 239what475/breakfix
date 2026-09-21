@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import {
+  awaitWorkflowState,
   apiBase,
+  igniteDocumentationPractice,
   loginBootstrapAdmin,
   loginThroughConsole,
   podLifetimeAnchor,
@@ -10,10 +12,9 @@ import {
   scaleRuntimeWorker,
 } from "../support/admin";
 
-const practiceBody = { page_path: podLifecyclePage, anchor: podLifetimeAnchor };
 
 test("admin console rescues a stuck documentation workflow end to end", async ({ page, request }) => {
-  test.setTimeout(15 * 60_000);
+  test.setTimeout(45 * 60_000);
   const session = readBootstrapAdmin();
   await loginThroughConsole(page, session);
   // The console shell mirrors the app layout: sidebar identity + queue stat
@@ -26,14 +27,13 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
   // Agent phases run against the in-cluster fixture, then the workflow parks
   // in MaterializingArtifact with a queued action and no Worker to claim it.
   await scaleRuntimeWorker(0);
-  const start = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${adminToken}` }, data: practiceBody });
+  const start = await igniteDocumentationPractice(request, adminToken, podLifecyclePage, podLifetimeAnchor);
   expect(start.status(), await start.text()).toBe(202);
   const started = await start.json() as { workflow_id: string };
   const workflowId = started.workflow_id;
-  await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${workflowId}'`), {
-    timeout: 90_000,
-    intervals: [1_000, 2_000],
-  }).toBe("MaterializingArtifact");
+  await awaitWorkflowState(
+    () => postgres(`SELECT state FROM document_workflows WHERE id = '${workflowId}'`),
+    /(MaterializingArtifact)/, 30 * 60_000);
 
   // The workflow list shows the stalled workflow on the stage stepper; the
   // overflow menu is the only entry to the destructive verbs. Force-fail
@@ -80,17 +80,15 @@ test("admin console rescues a stuck documentation workflow end to end", async ({
   // The ordinary ignition endpoint re-drives the restarted workflow. The
   // Worker comes back only after the re-run has parked again, so the console
   // actions are what rescue the workflow, then publication completes.
-  const reignite = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${adminToken}` }, data: practiceBody });
+  const reignite = await igniteDocumentationPractice(request, adminToken, podLifecyclePage, podLifetimeAnchor);
   expect(reignite.status(), await reignite.text()).toBe(202);
-  await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${workflowId}'`), {
-    timeout: 90_000,
-    intervals: [1_000, 2_000],
-  }).toBe("MaterializingArtifact");
+  await awaitWorkflowState(
+    () => postgres(`SELECT state FROM document_workflows WHERE id = '${workflowId}'`),
+    /(MaterializingArtifact)/, 30 * 60_000);
   await scaleRuntimeWorker(1);
-  await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${workflowId}'`), {
-    timeout: 10 * 60_000,
-    intervals: [2_000, 5_000, 10_000],
-  }).toBe("Published");
+  await awaitWorkflowState(
+    () => postgres(`SELECT state FROM document_workflows WHERE id = '${workflowId}'`),
+    /(Published)/, 30 * 60_000);
 
   // The audit trail of the console verbs stays asserted against the database;
   // the audit/queue/environment endpoint shapes live in the handler tests.

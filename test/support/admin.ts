@@ -125,6 +125,30 @@ export async function loginBootstrapAdmin(request: APIRequestContext): Promise<s
   return ((await login.json()) as { token: string }).token;
 }
 
+// Ignition acknowledges after the durable workflow creation; the Agent chain
+// (including the gate-rejection auto retry budget) runs in the background and
+// the caller observes progress by polling the workflow state.
+
+// Poll a workflow-state query until the workflow settles on an accepted
+// state or any terminal outcome, then assert the accepted set: a terminal
+// NoPractice/Rejected/Failed fails fast with its state instead of burning
+// the full window. Pass `accepted` as an unanchored group, e.g.
+// /(MaterializingArtifact|Verifying)/ - transient phases outside it keep
+// polling.
+export async function awaitWorkflowState(query: () => Promise<string>, accepted: RegExp, timeoutMs: number) {
+  await expect.poll(query, { timeout: timeoutMs, intervals: [2_000, 5_000, 10_000] })
+    .toMatch(new RegExp(`^(?:${accepted.source}|NoPractice|Rejected|Failed)$`));
+  const state = await query();
+  expect(state, `documentation workflow settled on ${state}`).toMatch(accepted);
+}
+export async function igniteDocumentationPractice(request: APIRequestContext, token: string, pagePath: string, anchor: string) {
+  return request.post(`${apiBase}/api/documentation/practice`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: { page_path: pagePath, anchor },
+    timeout: 10 * 60_000,
+  });
+}
+
 // Sign in through the embedded console and open the admin surface. The admin
 // entry appears only after the admin signs in.
 export async function loginThroughConsole(page: Page, session: AdminSession) {

@@ -48,3 +48,4 @@ test/test-results/
 
 # Web build stamp (make build skips an unchanged bundle)
 web/.breakfix-web-build
+.zcode/

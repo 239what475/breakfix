@@ -1,6 +1,8 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
 import {
   apiBase,
+  awaitWorkflowState,
+  igniteDocumentationPractice,
   autoscalePage,
   ingressPage,
   ingressWhatIsAnchor,
@@ -29,16 +31,12 @@ const mergedScope = {
 };
 
 async function parkAtMaterializingArtifact(request: APIRequestContext, token: string, pagePath: string, anchor: string) {
-  const start = await request.post(`${apiBase}/api/documentation/practice`, {
-    headers: { Authorization: `Bearer ${token}` },
-    data: { page_path: pagePath, anchor },
-  });
+  const start = await igniteDocumentationPractice(request, token, pagePath, anchor);
   expect(start.status(), await start.text()).toBe(202);
   const started = await start.json() as { workflow_id: string };
-  await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${started.workflow_id}'`), {
-    timeout: 3 * 60_000,
-    intervals: [1_000, 2_000],
-  }).toBe("MaterializingArtifact");
+  await awaitWorkflowState(
+    () => postgres(`SELECT state FROM document_workflows WHERE id = '${started.workflow_id}'`),
+    /(MaterializingArtifact)/, 30 * 60_000);
   return started.workflow_id;
 }
 
@@ -50,7 +48,7 @@ async function failQueuedAction(workflowId: string, failureCode: string) {
 }
 
 test("watchdog and batch controls share one parked chain", async ({ request }) => {
-  test.setTimeout(25 * 60_000);
+  test.setTimeout(50 * 60_000);
   const token = await loginBootstrapAdmin(request);
 
   // Park the whole chain by removing the worker, then let the watchdog map
@@ -128,7 +126,7 @@ test("watchdog and batch controls share one parked chain", async ({ request }) =
   // The worker return drives the re-enqueued page through publication.
   await scaleRuntimeWorker(1);
   await expect.poll(async () => (await findBatchItem(request, token, retriedBatch.id, ingressPage))?.state ?? "missing", {
-    timeout: 12 * 60_000,
+    timeout: 30 * 60_000,
     intervals: [3_000, 5_000, 10_000],
   }).toBe("Published");
   expect(await postgres(`SELECT state FROM document_workflows WHERE id = '${failedWorkflowId}'`)).toBe("Published");

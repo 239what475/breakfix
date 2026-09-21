@@ -323,6 +323,13 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		return nil, fmt.Errorf("load embedded web assets: %w", err)
 	}
 	serviceContext := services.ctx
+	documentationApplication, err := newFixedDocumentationApplication(documentationPipeline, documentationLibrary)
+	if err != nil {
+		services.stop()
+		incusClient.Close()
+		cleanupDatabase()
+		return nil, fmt.Errorf("create documentation application: %w", err)
+	}
 	handler, err := httpapi.NewHandlerWithDependencies(database, k8sClient, cfg, httpapi.Dependencies{
 		NodeTerminal:         incusClient,
 		Assistant:            assistantService,
@@ -330,7 +337,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		Catalog:              catalogService,
 		AgentRuntimeContext:  serviceContext,
 		Generator:            generatorService,
-		Documentation:        newFixedDocumentationApplication(documentationPipeline, documentationLibrary),
+		Documentation:        documentationApplication,
 		DocumentationBatches: documentationBatches,
 		DocumentationLibrary: documentationLibrary,
 		SystemReport:         newSystemReportProvider(cfg, services.registry, documentationLibrary).Report,

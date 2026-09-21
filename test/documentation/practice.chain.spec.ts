@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { awaitWorkflowState, registerAndLogin } from "../support/admin";
 
 const execFile = promisify(execFileCallback);
 
@@ -65,11 +66,17 @@ async function runtimeEnvironmentExists(uid: string) {
 // one page of the opened corpus.
 const practiceStartBody = { page_path: "docs/concepts/workloads/pods/pod-lifecycle", anchor: "pod-lifetime" };
 
+// Ignition acknowledges after the durable workflow creation; the Agent chain
+// (including the gate-rejection auto retry up to the max_revisions budget)
+// runs in the background. The polls below - not the request - are the windows
+// that must cover the full retry budget: a live model attempt takes minutes.
+const chainRequestTimeout = 60_000;
+
 async function postAfterServerRestart(request: APIRequestContext, url: string, token: string) {
   let lastError: unknown;
   for (let attempt = 0; attempt < 8; attempt += 1) {
     try {
-      return await request.post(url, { headers: { Authorization: `Bearer ${token}` }, data: practiceStartBody });
+      return await request.post(url, { headers: { Authorization: `Bearer ${token}` }, data: practiceStartBody, timeout: chainRequestTimeout });
     } catch (error) {
       lastError = error;
       await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
@@ -84,7 +91,7 @@ async function gotoReader(page: Page, readerUrl: string) {
 }
 
 test("fixed documentation practice runs through publication", async ({ page, request }) => {
-  test.setTimeout(12 * 60_000);
+  test.setTimeout(40 * 60_000);
   if (!apiBase) throw new Error("BREAKFIX_E2E_BASE_URL is required for the documentation workflow test");
   const username = `documentation-${Date.now()}`;
   const register = await request.post(`${apiBase}/api/auth/register`, { data: { username, password: "documentation-test-password" } });
@@ -94,25 +101,23 @@ test("fixed documentation practice runs through publication", async ({ page, req
   expect(login.status(), await login.text()).toBe(200);
   const credentials = await login.json() as { token: string };
 
-  const start = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${credentials.token}` }, data: practiceStartBody });
+  const start = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${credentials.token}` }, data: practiceStartBody, timeout: chainRequestTimeout });
   expect(start.status(), await start.text()).toBe(202);
   const started = await start.json() as { workflow_id: string; state: string };
   expect(started.workflow_id).toMatch(/^document-workflow-/);
-  await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${started.workflow_id}'`), {
-    timeout: 60_000,
-    intervals: [500, 1_000, 2_000],
-  }).toMatch(/^(MaterializingArtifact|Verifying)$/);
+  await awaitWorkflowState(
+    () => postgres(`SELECT state FROM document_workflows WHERE id = '${started.workflow_id}'`),
+    /(MaterializingArtifact|Verifying)/, 30 * 60_000);
   await expect.poll(async () => postgres(`SELECT state FROM runnable_actions WHERE content_kind = 'documentation-practice' AND phase = 'materialize-artifact'`), {
-    timeout: 60_000,
-    intervals: [500, 1_000, 2_000],
+    timeout: 10 * 60_000,
+    intervals: [1_000, 2_000, 5_000],
   }).toBe("running");
   await restartDeployment("breakfix-runtime-worker");
   await restartDeployment("breakfix-server");
 
-  await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${started.workflow_id}'`), {
-    timeout: 9 * 60_000,
-    intervals: [1_000, 2_000, 5_000, 10_000],
-  }).toBe("Published");
+  await awaitWorkflowState(
+    () => postgres(`SELECT state FROM document_workflows WHERE id = '${started.workflow_id}'`),
+    /(Published)/, 30 * 60_000);
   expect(await postgres(`SELECT COUNT(*) FROM document_publication_manifests WHERE workflow_id = '${started.workflow_id}'`)).toBe("1");
   expect(await postgres("SELECT COUNT(*) FROM document_practice_index WHERE source_id = 'kubernetes' AND commit = 'ce98a43f24257385a9766003a6dadc95e962dc63'")).toBe("1");
   expect(await postgres(`SELECT COUNT(*) FROM document_artifact_ledger WHERE workflow_id = '${started.workflow_id}' AND kind IN ('document-context', 'learning-unit-plan', 'plan-gate', 'practice-candidate', 'artifact-gate', 'runnable-revision', 'verification-report', 'verification-review', 'publication-manifest')`)).toBe("9");
@@ -150,24 +155,28 @@ test("fixed documentation practice runs through publication", async ({ page, req
 async function ensurePracticePublished(request: APIRequestContext) {
   const count = await postgres("SELECT COUNT(*) FROM document_practice_index WHERE anchor = 'pod-lifetime'");
   if (Number(count) >= 1) return;
-  const username = `practice-reader-${Date.now()}`;
-  const register = await request.post(`${apiBase}/api/auth/register`, { data: { username, password: "documentation-test-password" } });
-  expect(register.status(), await register.text()).toBe(201);
-  const registration = await register.json() as { totp_secret: string };
-  const login = await request.post(`${apiBase}/api/auth/login`, { data: { username, password: "documentation-test-password", totp_code: totp(registration.totp_secret) } });
-  expect(login.status(), await login.text()).toBe(200);
-  const credentials = await login.json() as { token: string };
-  const start = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${credentials.token}` }, data: practiceStartBody });
+  // The ignition endpoint is admin-only. On a virgin target this suite's own
+  // first registration is the bootstrap admin - the same election semantics
+  // the admin suite relies on - so the fallback ignition drives with exactly
+  // that identity. When the target already elected its admin elsewhere (the
+  // publication test registered first but failed to publish), no identity this
+  // spec can mint may ignite: fail on the role assertion instead of an opaque
+  // 403 from a doomed request.
+  const admin = await registerAndLogin(request, `practice-reader-${Date.now()}`);
+  expect(admin.role, [
+    "the pinned practice is unpublished and this registration is not the bootstrap admin;",
+    "on a fresh target the publication test must run (and publish) first",
+  ].join(" ")).toBe("admin");
+  const start = await request.post(`${apiBase}/api/documentation/practice`, { headers: { Authorization: `Bearer ${admin.token}` }, data: practiceStartBody, timeout: chainRequestTimeout });
   expect(start.status(), await start.text()).toBe(202);
   const started = await start.json() as { workflow_id: string };
-  await expect.poll(async () => postgres(`SELECT state FROM document_workflows WHERE id = '${started.workflow_id}'`), {
-    timeout: 10 * 60_000,
-    intervals: [1_000, 2_000, 5_000, 10_000],
-  }).toBe("Published");
+  await awaitWorkflowState(
+    () => postgres(`SELECT state FROM document_workflows WHERE id = '${started.workflow_id}'`),
+    /(Published)/, 30 * 60_000);
 }
 
 test("the practice session prepares, attaches, and stops in the panel", async ({ page, request }) => {
-  test.setTimeout(15 * 60_000);
+  test.setTimeout(45 * 60_000);
   await ensurePracticePublished(request);
 
   // A logged-in reader: the session verbs all require the JWT.
