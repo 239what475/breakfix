@@ -15,9 +15,7 @@ import (
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
-	"github.com/breakfix/breakfix/internal/domain/audit"
 	authoringdomain "github.com/breakfix/breakfix/internal/domain/authoring"
-	documentdomain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	generationdomain "github.com/breakfix/breakfix/internal/domain/generation"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 	"github.com/breakfix/breakfix/internal/domain/toolresult"
@@ -53,10 +51,7 @@ type Handler struct {
 	nodeTerminal         NodeTerminalProvider
 	nodeProviderReady    NodeProviderReadiness
 	generator            generatorApplication
-	documentation        documentationApplication
-	documentationBatches documentationBatchApplication
 	documentationLibrary documentationLibrary
-	documentationReader  documentationPracticeReader
 	systemReport         SystemReportProvider
 }
 
@@ -81,15 +76,6 @@ type generatorApplication interface {
 	CancelGeneration(context.Context, string, generationdomain.Cancellation) (*generationdomain.Workflow, error)
 }
 
-// documentationApplication starts only the Server-configured fixed workflow
-// and carries the administrative force-fail and restart verbs. It has no
-// endpoint for Agent artifacts, arbitrary pages, or runtime policy.
-type documentationApplication interface {
-	StartDocumentationPractice(context.Context, string, string, string) (documentdomain.Workflow, error)
-	ForceFailDocumentationWorkflow(context.Context, string, string, *audit.HumanAction) (documentdomain.Workflow, error)
-	RestartDocumentationWorkflow(context.Context, string, string, *audit.HumanAction) (documentdomain.Workflow, error)
-}
-
 type Dependencies struct {
 	NodeTerminal         NodeTerminalProvider
 	Assistant            *appassistant.Service
@@ -98,10 +84,7 @@ type Dependencies struct {
 	AgentRuntimeContext  context.Context
 	Generator            generatorApplication
 	RunnableBindings     operationsRunnableBindingResolver
-	Documentation        documentationApplication
-	DocumentationBatches documentationBatchApplication
 	DocumentationLibrary documentationLibrary
-	DocumentationReader  documentationPracticeReader
 	// SystemReport assembles the admin system status from process-scoped state
 	// that only the bootstrap owns: build information and the background
 	// service registry.
@@ -112,15 +95,6 @@ type Dependencies struct {
 // reconstructing a runtime profile or artifact from mutable content data.
 type operationsRunnableBindingResolver interface {
 	ResolveOperationsRevisionBinding(context.Context, string) (runnable.RevisionReference, error)
-}
-
-// documentationPracticeReader is the reader-facing port over published
-// practices: the per-page index, one reader-visible revision, and the
-// immutable runnable revision its runtime summary resolves through.
-type documentationPracticeReader interface {
-	ListPublishedPracticesForPage(ctx context.Context, sourceID, commit, language, pagePath string) ([]postgres.PublishedPracticeSummary, error)
-	GetPublishedPractice(ctx context.Context, practiceID string) (documentdomain.PracticeRevision, error)
-	ResolveRunnableRevision(ctx context.Context, id, digest string) (runnable.RunnableRevision, error)
 }
 
 func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Client, cfg config.Config, dependencies Dependencies) (*Handler, error) {
@@ -179,17 +153,11 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		incusConfig:          cfg.Incus,
 		nodeTerminal:         dependencies.NodeTerminal,
 		generator:            dependencies.Generator,
-		documentation:        dependencies.Documentation,
-		documentationBatches: dependencies.DocumentationBatches,
 		documentationLibrary: dependencies.DocumentationLibrary,
-		documentationReader:  dependencies.DocumentationReader,
 		systemReport:         dependencies.SystemReport,
 	}
 	if handler.runnableBindings == nil && database != nil {
 		handler.runnableBindings = database.Runnable
-	}
-	if handler.documentationReader == nil && database != nil {
-		handler.documentationReader = postgresPracticeReader{store: database}
 	}
 	handler.authoring = dependencies.Authoring
 	handler.assistant = dependencies.Assistant

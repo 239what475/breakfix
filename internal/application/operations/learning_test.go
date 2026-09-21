@@ -69,7 +69,7 @@ func TestEvaluateLearningCheckpointsRejectsNonOperationsRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec.Identity.Kind = "documentation-practice"
+	spec.Identity.Kind = "foreign"
 	revision := revisionForSpec(t, spec)
 	profileDigest, err := spec.RuntimeProfile.Digest()
 	if err != nil {

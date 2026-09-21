@@ -19,11 +19,11 @@ const authOpen = ref(false);
 const authMode = ref<"login" | "register">("login");
 const authoringOpen = ref(false);
 const authoringSessionId = ref<string>();
-type AdminSection = "workflows" | "users" | "audit" | "corpus";
+type AdminSection = "users" | "audit";
 
 function adminSectionFromPath(): AdminSection {
-	const match = window.location.pathname.match(/^\/admin\/(workflows|users|audit|corpus)$/);
-	return (match?.[1] as AdminSection) ?? "workflows";
+	const match = window.location.pathname.match(/^\/admin\/(users|audit)$/);
+	return (match?.[1] as AdminSection) ?? "users";
 }
 
 const page = ref<"operations" | "my-space" | "documentation" | "admin">(window.location.pathname.startsWith("/admin/") ? "admin" : window.location.pathname === "/documentation" ? "documentation" : "operations");
@@ -103,7 +103,7 @@ function openMySpace() {
 	page.value = "my-space";
 }
 
-function openAdmin(section: AdminSection = "workflows") {
+function openAdmin(section: AdminSection = "users") {
 	if (!isAdmin.value) return;
 	closeAuthoring();
 	closeWorkspace();

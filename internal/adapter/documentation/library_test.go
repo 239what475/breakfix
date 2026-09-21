@@ -9,22 +9,21 @@ import (
 	"testing"
 
 	"github.com/breakfix/breakfix/internal/docsproject"
-	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 )
 
-func libraryIdentity(context domain.DocumentContext) LibraryIdentity {
+func libraryIdentity(context DocumentContext) LibraryIdentity {
 	return LibraryIdentity{SourceID: context.SourceID, Repository: context.Repository, Commit: context.Commit, Version: context.Version, Language: context.Language, License: context.License}
 }
 
-func libraryContext() domain.DocumentContext {
-	return domain.DocumentContext{FormatVersion: domain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Commit: strings.Repeat("a", 40), Version: "snapshot-aaa", Language: "en", License: "CC BY 4.0", PagePath: "docs/concepts/workloads/pods/pod-lifecycle", Anchor: "pod-lifetime"}
+func libraryContext() DocumentContext {
+	return DocumentContext{FormatVersion: FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Commit: strings.Repeat("a", 40), Version: "snapshot-aaa", Language: "en", License: "CC BY 4.0", PagePath: "docs/concepts/workloads/pods/pod-lifecycle", Anchor: "pod-lifetime"}
 }
 
 const libraryMarkdown = "# Pod Lifecycle\n\nPods follow a defined lifecycle.\n\n## Pod lifetime\n\nA Pod is mortal.\n\n## Pod phase\n\nThe phase is Pending.\n"
 
 // writeLibraryMaterial builds a minimal real-shape library directory: global
 // manifest plus one page directory whose digests are computed from content.
-func writeLibraryMaterial(t *testing.T, root string, context domain.DocumentContext, markdown string, mutateGlobal func(*docsproject.GlobalManifest), mutatePage func(*docsproject.PageManifest)) {
+func writeLibraryMaterial(t *testing.T, root string, context DocumentContext, markdown string, mutateGlobal func(*docsproject.GlobalManifest), mutatePage func(*docsproject.PageManifest)) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(context.PagePath)), 0o755); err != nil {
 		t.Fatal(err)
@@ -244,8 +243,8 @@ func TestPinnedKubernetesPodLifecycleLibrarySmoke(t *testing.T) {
 	if version == "" {
 		version = "snapshot-ce98a43"
 	}
-	context := domain.DocumentContext{
-		FormatVersion: domain.FormatVersion,
+	context := DocumentContext{
+		FormatVersion: FormatVersion,
 		SourceID:      "kubernetes",
 		Repository:    "https://github.com/kubernetes/website.git",
 		Commit:        commit,

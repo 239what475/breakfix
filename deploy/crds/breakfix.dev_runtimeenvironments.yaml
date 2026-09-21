@@ -115,12 +115,12 @@ spec:
             - message: blankRuntime is immutable
               rule: oldSelf == null || self.blankRuntime == oldSelf.blankRuntime
             - message: blankRuntime excludes runnableRevisionRef
-              rule: '!has(self.blankRuntime) || (self.runnableRevisionRef.id == ''''
-                && self.runnableRevisionRef.digest == '''')'
+              rule: '!has(self.blankRuntime) || (self.runnableRevisionRef.id == ”
+                && self.runnableRevisionRef.digest == ”)'
             - message: runnableRevisionRef requires id and digest when blankRuntime
                 is absent
-              rule: has(self.blankRuntime) || (self.runnableRevisionRef.id != '' &&
-                self.runnableRevisionRef.digest != '')
+              rule: has(self.blankRuntime) || (self.runnableRevisionRef.id != ” &&
+                self.runnableRevisionRef.digest != ”)
             - message: purpose is immutable
               rule: oldSelf == null || self.purpose == oldSelf.purpose
             - message: resetNonce must be monotonic

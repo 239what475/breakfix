@@ -20,7 +20,6 @@ import (
 	appassistant "github.com/breakfix/breakfix/internal/application/assistant"
 	appauthoring "github.com/breakfix/breakfix/internal/application/authoring"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
-	appdoc "github.com/breakfix/breakfix/internal/application/documentpractice"
 	appgeneration "github.com/breakfix/breakfix/internal/application/generation"
 	appinteractive "github.com/breakfix/breakfix/internal/application/interactive"
 	applearning "github.com/breakfix/breakfix/internal/application/learning"
@@ -213,31 +212,11 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("create generation runnable coordinator: %w", err)
 	}
-	documentationPipeline, documentationService, documentationLibrary, err := newDocumentationPipeline(cfg, database)
+	documentationLibrary, err := openDocumentationLibrary(cfg)
 	if err != nil {
 		incusClient.Close()
 		cleanupDatabase()
-		return nil, fmt.Errorf("configure documentation practice pipeline: %w", err)
-	}
-	if documentationPipeline != nil {
-		// Workflows created before page identity columns existed carry their
-		// corpus coordinates only inside the ledger; enrich them once at boot.
-		if _, err := database.DocumentPractice.BackfillWorkflowPageIdentity(ctx); err != nil {
-			incusClient.Close()
-			cleanupDatabase()
-			return nil, fmt.Errorf("backfill documentation workflow page identity: %w", err)
-		}
-	}
-
-	documentationBatches := newDocumentationBatches(documentationService, documentationLibrary)
-	var documentationScheduler *appdoc.BatchScheduler
-	if documentationPipeline != nil {
-		documentationScheduler, err = newDocumentationBatchScheduler(documentationService, documentationPipeline)
-		if err != nil {
-			incusClient.Close()
-			cleanupDatabase()
-			return nil, fmt.Errorf("create documentation batch scheduler: %w", err)
-		}
+		return nil, err
 	}
 
 	var catalogInstaller *appcatalog.Installer
@@ -323,13 +302,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		return nil, fmt.Errorf("load embedded web assets: %w", err)
 	}
 	serviceContext := services.ctx
-	documentationApplication, err := newFixedDocumentationApplication(documentationPipeline, documentationLibrary)
-	if err != nil {
-		services.stop()
-		incusClient.Close()
-		cleanupDatabase()
-		return nil, fmt.Errorf("create documentation application: %w", err)
-	}
 	handler, err := httpapi.NewHandlerWithDependencies(database, k8sClient, cfg, httpapi.Dependencies{
 		NodeTerminal:         incusClient,
 		Assistant:            assistantService,
@@ -337,8 +309,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		Catalog:              catalogService,
 		AgentRuntimeContext:  serviceContext,
 		Generator:            generatorService,
-		Documentation:        documentationApplication,
-		DocumentationBatches: documentationBatches,
 		DocumentationLibrary: documentationLibrary,
 		SystemReport:         newSystemReportProvider(cfg, services.registry, documentationLibrary).Report,
 	})
@@ -387,14 +357,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		incusClient.Close()
 		cleanupDatabase()
 		return nil, fmt.Errorf("recover generation runnable coordinator: %w", err)
-	}
-	if documentationPipeline != nil {
-		if err := documentationPipeline.Recover(ctx); err != nil {
-			services.stop()
-			incusClient.Close()
-			cleanupDatabase()
-			return nil, fmt.Errorf("recover documentation practice workflow: %w", err)
-		}
 	}
 	if err := interactiveRecovery.Recover(ctx); err != nil {
 		services.stop()
@@ -447,12 +409,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	services.start("assistant environment lease maintenance", leaseMaintainer.Run)
 	publicationFinalizer.OnTick = services.tickObserver("generation publication finalizer")
 	services.start("generation publication finalizer", publicationFinalizer.Run)
-	if documentationPipeline != nil {
-		documentationPipeline.OnTick = services.tickObserver("documentation practice action reconciler")
-		services.start("documentation practice action reconciler", documentationPipeline.Run)
-		documentationScheduler.OnTick = services.tickObserver("documentation batch scheduler")
-		services.start("documentation batch scheduler", documentationScheduler.Run)
-	}
 	services.start("interactive agent recovery", interactiveRecovery.Run)
 
 	slog.Info("Breakfix Server starting", "version", buildinfo.Version, "data_dir", cfg.DataDir)

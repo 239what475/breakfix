@@ -10,7 +10,8 @@ Breakfix 按依赖和失败边界分层测试。日常测试不启动模型、�
 | 快速测试 | Go 领域逻辑、API、前端纯逻辑和 Controller 决策 | `make test-unit`、前端测试 |
 | 集成测试 | PostgreSQL、OCI/Catalog、Incus 和外部适配器契约 | 按依赖显式运行 |
 | 平台验收 | Kind、Registry、Server、Controller、Runtime Worker、Incus 的少量真实主路径 | `make test-e2e-regression`（编排，或其中的 ui/k8s/node/recovery 单套件） |
-| Live Agent 验收 | 真实模型、OpenSandbox、网页 Node/K8s 与 MCP Authoring 全链路，以及真实模型驱动的文档实践流水线与管理台 | `make test-e2e-documentation`、`make test-e2e-admin`、`make test-acceptance-node`、`make test-acceptance-mcp` 或手工 K8s 入口 |
+| 文档验收 | 解析库渲染与空白实践场景（真实 vk8s 环境，无模型依赖） | `make test-e2e-documentation` |
+| Live Agent 验收 | 真实模型、OpenSandbox、网页 Node/K8s 与 MCP Authoring 全链路 | `make test-acceptance-node`、`make test-acceptance-mcp` 或手工 K8s 入口 |
 
 平台验收不替代快速测试；Controller 的 `envtest` 也不替代真实 Kind。发布冲突、finalizer、revision 并发和数据库边界由 Go
 单元/集成测试覆盖，不塞进浏览器场景。
@@ -30,8 +31,8 @@ Secret（随机数据库/JWT/Registry 凭据，prepare 链拥有的字段留空�
 的目标。部署清单对 Incus Secret 的引用全部可选，Server/Controller/Runtime Worker 以 Node-less 模式启动：Node
 场景的置备、物化与终端在第一时间报 "provider is not configured"，K8s 场景不受影响。`node`、`recovery`、
 `acceptance-node`、`acceptance-mcp`、`acceptance-interruption`、`agent-assistant`、`agent-soak` 套件在 core
-剖面下启动即报需要 full 剖面；documentation 与 admin 套件只依赖 k8s 运行时、
-不限剖面，但与其他 agent 套件一样要求 `RUN_AGENT_LIVE_E2E=1`（真实模型）；`recovery` 断言 incus PTY 终端重连与 node answer 完成恢复，刻意保留 Node
+剖面下启动即报需要 full 剖面；documentation 套件只依赖 k8s 运行时、不限剖面，也不需要
+模型凭证（空白实践场景是纯环境动词）；`recovery` 断言 incus PTY 终端重连与 node answer 完成恢复，刻意保留 Node
 fixture。full 剖面的 preflight 额外要求 runtime Secret 提供 `incus_endpoint`，且 Incus 证书与 remote 属于
 运维提供的外部资源，不由 bootstrap 生成。
 
@@ -69,7 +70,7 @@ prepare：
 make test-e2e-regression
 ```
 
-它执行一次 documentation prepare，随后按 admin →（数据库级 reset）→ documentation → k8s → ui 串行运行；
+它执行一次 documentation prepare，随后按 documentation →（数据库级 reset）→ k8s → ui 串行运行；
 full 剖面再追加 node 与 recovery。数据库级 reset 只重建数据库并让 Server 从 runtime Secret 记录的
 digest 重装 fixture Catalog，部署、文档库挂载、Registry 与 prepared 标记全部保持原样。
 
@@ -99,16 +100,14 @@ MCP 验收额外断言审核包校验并原子投影到临时目录，重复同�
 不能读取 workflow。
 
 ```bash
-RUN_AGENT_LIVE_E2E=1 make test-e2e-documentation   # 文档实践链（真实模型）
-RUN_AGENT_LIVE_E2E=1 make test-e2e-admin           # 批次调度/看门狗/救援（真实模型）
+make test-e2e-documentation                       # 文档读者 + 空白实践场景（真实 vk8s）
 RUN_AGENT_LIVE_E2E=1 make test-acceptance-node
 RUN_AGENT_LIVE_E2E=1 make test-acceptance-mcp
 RUN_AGENT_LIVE_E2E=1 ./scripts/kind/run-e2e.sh acceptance-k8s
 ```
 
-documentation prepare 支持从调用方环境注入凭证：导出 `DEEPSEEK_API_KEY` 即写入目标
-runtime Secret（值不进仓库）；未导出时拒绝占位或空的 `deepseek_api_key`。这两组套件消费真实模型配额，
-断言的是持久化的流水线状态（批次、门禁、digest、发布索引），不断言模型措辞。
+文档套件不再依赖模型凭证：空白实践场景只供给真实 vk8s 环境，断言的是会话状态机与终端交互，
+不断言模型措辞。
 
 这些入口只断言持久化状态、公开场景、Environment、checkpoint 结果和 MCP 本地审核投影，不断言模型措辞、prompt、工具调用次数或
 Markdown 渲染。失败时保留 AuthoringSession、GenerationWorkflow、AgentRun、CandidateRevision、Environment、Worker 日志和
@@ -126,15 +125,15 @@ CI 只运行可以在托管 runner 上复现的层级：
   手动 `workflow_dispatch` 遵循同一 gate，`force` 输入可强制全跑。重 job 为 core 剖面全量
   回归（空集群 `make e2e-bootstrap-core` + `BREAKFIX_E2E_PROFILE=core make
   test-e2e-regression`，失败留存 `.local/e2e` 诊断 artifact）与 `make test-vk8s-network`；
-- **永不进 CI**：node/recovery 套件（外部 Incus）、live agent 验收（真实模型，含
-  documentation/admin 套件）——它们属于本地专用 target 与显式人工验收。
+- **永不进 CI**：node/recovery 套件（外部 Incus）、live agent 验收（真实模型）、
+  documentation 套件（自建 Kind 目标上的真实 vk8s 环境）——它们属于本地专用 target 与显式人工验收。
 
 本地日常只跑与变更相关的层级，全量回归交给 nightly 与阶段收尾：
 
 | 变更区域 | 本地最相关 |
 | --- | --- |
 | `web/` | `make web-test-unit`；动到浏览路径再跑 ui 套件 |
-| handler / transport / admin、documentation API | `make test-unit`；按需 live 的 admin/documentation 套件（真实模型） |
+| handler / transport / admin、documentation API | `make test-unit`；按需 documentation 套件（真实 vk8s） |
 | runtime（k8s/vcluster）/ controller | `make test-unit`；按需 k8s 套件 |
 | runtime（node）/ Incus 适配 | `make test-unit`；full target 上按需 node 套件 |
 | `scripts/`、`deploy/`、Makefile | 受影响套件；改 prepare/reset 链后跑一次回归编排 |

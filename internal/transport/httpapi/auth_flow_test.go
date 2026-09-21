@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,7 +15,6 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/domain/audit"
-	documentdomain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	testpostgres "github.com/breakfix/breakfix/internal/testkit/postgres"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
@@ -221,18 +219,18 @@ func TestLegacyTokenWithoutRoleClaimIsAnOrdinaryUser(t *testing.T) {
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("user token on admin endpoint = %d, want 403", recorder.Code)
 	}
-	recorder = server.do(t, http.MethodPost, "/api/documentation/practice", userToken, documentationPracticeStartBody)
+	recorder = server.do(t, http.MethodGet, "/api/admin/audit", userToken, nil)
 	if recorder.Code != http.StatusForbidden {
-		t.Fatalf("user token on practice ignition = %d, want 403: %s", recorder.Code, recorder.Body.String())
+		t.Fatalf("user token on admin audit = %d, want 403: %s", recorder.Code, recorder.Body.String())
 	}
 	recorder = server.do(t, http.MethodPost, "/api/admin/users/u-legacy/totp-reset", userToken, nil)
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("user token on totp reset = %d, want 403", recorder.Code)
 	}
 
-	recorder = server.do(t, http.MethodPost, "/api/documentation/practice", adminToken, documentationPracticeStartBody)
+	recorder = server.do(t, http.MethodGet, "/api/admin/audit", adminToken, nil)
 	if recorder.Code == http.StatusForbidden || recorder.Code == http.StatusUnauthorized {
-		t.Fatalf("admin token on practice ignition = %d, want past authorization", recorder.Code)
+		t.Fatalf("admin token on admin audit = %d, want past authorization", recorder.Code)
 	}
 }
 
@@ -338,110 +336,6 @@ func mustTOTPSecret(t *testing.T, username string) string {
 		t.Fatalf("generate totp secret: %v", err)
 	}
 	return secret
-}
-
-// documentationPracticeStartBody is the page-addressed ignition request.
-var documentationPracticeStartBody = map[string]string{
-	"page_path": "docs/concepts/workloads/pods/pod-lifecycle",
-	"anchor":    "pod-lifetime",
-}
-
-// auditRecordingDocumentationApplication mimics the deployment-owned fixed
-// application: it forwards the ignition actor and records the human action
-// through the real document practice repository.
-type auditRecordingDocumentationApplication struct {
-	db     *postgres.Store
-	actors []string
-}
-
-func (a *auditRecordingDocumentationApplication) ForceFailDocumentationWorkflow(context.Context, string, string, *audit.HumanAction) (documentdomain.Workflow, error) {
-	return documentdomain.Workflow{}, errors.New("not implemented")
-}
-
-func (a *auditRecordingDocumentationApplication) RestartDocumentationWorkflow(context.Context, string, string, *audit.HumanAction) (documentdomain.Workflow, error) {
-	return documentdomain.Workflow{}, errors.New("not implemented")
-}
-
-func (a *auditRecordingDocumentationApplication) StartDocumentationPractice(ctx context.Context, actorID, pagePath, anchor string) (documentdomain.Workflow, error) {
-	a.actors = append(a.actors, actorID)
-	now := time.Now().UTC()
-	workflow, err := documentdomain.NewWorkflow("document-workflow-01", now)
-	if err != nil {
-		return documentdomain.Workflow{}, err
-	}
-	detail, err := json.Marshal(map[string]string{"workflow_id": workflow.ID})
-	if err != nil {
-		return documentdomain.Workflow{}, err
-	}
-	context := documentdomain.DocumentContext{FormatVersion: documentdomain.FormatVersion, SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Commit: strings.Repeat("a", 40), Version: "snapshot-a", Language: "en", License: "CC BY 4.0", PagePath: pagePath, Anchor: anchor}
-	identity := documentdomain.WorkflowPageIdentity{SourceID: context.SourceID, Commit: context.Commit, Language: context.Language, PagePath: pagePath, Anchor: anchor}
-	workflow.ID = "document-workflow-" + documentdomain.ContentID(context)
-	action := audit.HumanAction{
-		ID:         audit.NewID(now),
-		UserID:     actorID,
-		Action:     audit.ActionDocumentationPracticeStart,
-		TargetType: audit.TargetDocumentWorkflow,
-		TargetID:   workflow.ID,
-		Detail:     detail,
-		CreatedAt:  now,
-	}
-	if err := a.db.DocumentPractice.CreateWorkflow(ctx, workflow, identity, &action); err != nil {
-		stored, getErr := a.db.DocumentPractice.GetWorkflow(ctx, workflow.ID)
-		if getErr != nil {
-			return documentdomain.Workflow{}, err
-		}
-		return stored, nil
-	}
-	return workflow, nil
-}
-
-func TestIgnitionRecordsTheActingAdminInTheHumanAudit(t *testing.T) {
-	application := &auditRecordingDocumentationApplication{}
-	server := newAuthTestServer(t, func(cfg *config.Config, dependencies *Dependencies, _ *postgres.Store) *kubernetes.Client {
-		dependencies.Documentation = application
-		return nil
-	})
-	application.db = server.db
-	adminRegister := server.register(t, "alice", "alice-password")
-	adminToken := server.login(t, "alice", "alice-password", adminRegister.TotpSecret)
-	userRegister := server.register(t, "bob", "bob-password")
-	userToken := server.login(t, "bob", "bob-password", userRegister.TotpSecret)
-
-	recorder := server.do(t, http.MethodPost, "/api/documentation/practice", adminToken, documentationPracticeStartBody)
-	if recorder.Code != http.StatusAccepted {
-		t.Fatalf("admin ignition = %d: %s", recorder.Code, recorder.Body.String())
-	}
-	var started struct {
-		WorkflowID string `json:"workflow_id"`
-		State      string `json:"state"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &started); err != nil {
-		t.Fatal(err)
-	}
-	workflowID := started.WorkflowID
-	if workflowID == "" {
-		t.Fatal("ignition response carries no workflow id")
-	}
-	if len(application.actors) != 1 || application.actors[0] == "" {
-		t.Fatalf("ignition actors = %#v, want the admin identifier", application.actors)
-	}
-	rows, err := server.db.Audit.ListHumanActions(context.Background(), postgres.HumanActionFilter{Action: audit.ActionDocumentationPracticeStart, Limit: 10})
-	if err != nil {
-		t.Fatalf("list ignition audits: %v", err)
-	}
-	if len(rows) != 1 || rows[0].UserID != application.actors[0] || rows[0].TargetID != workflowID {
-		t.Fatalf("ignition audit rows = %#v, want target %q", rows, workflowID)
-	}
-
-	// A rejected non-admin ignition changes nothing and records nothing.
-	recorder = server.do(t, http.MethodPost, "/api/documentation/practice", userToken, documentationPracticeStartBody)
-	if recorder.Code != http.StatusForbidden {
-		t.Fatalf("non-admin ignition = %d, want 403", recorder.Code)
-	}
-	rows, err = server.db.Audit.ListHumanActions(context.Background(), postgres.HumanActionFilter{Action: audit.ActionDocumentationPracticeStart, Limit: 10})
-	if err != nil || len(rows) != 1 {
-		t.Fatalf("ignition audit rows after rejection = %#v, %v", rows, err)
-	}
 }
 
 func TestAdminAuditEndpointFiltersAndPagesTheLedger(t *testing.T) {

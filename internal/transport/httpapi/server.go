@@ -146,20 +146,8 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	router.GET("/api/documentation/page", optionalJWTMW, h.GetDocumentationPage)
 	router.GET("/api/documentation/tree", optionalJWTMW, h.GetDocumentationTree)
 	router.GET("/api/documentation/asset", optionalJWTMW, h.GetDocumentationAsset)
-	router.GET("/api/documentation/practices", optionalJWTMW, h.ListDocumentationPractices)
-	router.GET("/api/documentation/practices/:id", optionalJWTMW, h.GetDocumentationPractice)
 	documentationRoutes := router.Group("/api/documentation")
 	documentationRoutes.Use(jwtMW)
-	// Ignition is an admin verb: the fixed documentation workflow is a
-	// deployment-wide operation, not a per-user action.
-	documentationRoutes.POST("/practice", middleware.RequireAdmin(), h.StartDocumentationPractice)
-	// Practice environments are per-user session verbs with the same
-	// find-or-create lifecycle as the Operations scenario environment.
-	documentationRoutes.POST("/practices/:id/start", h.StartDocumentationPracticeEnvironment)
-	documentationRoutes.GET("/practices/:id/environment", h.GetDocumentationPracticeEnvironment)
-	documentationRoutes.POST("/practices/:id/stop", h.StopDocumentationPracticeEnvironment)
-	documentationRoutes.POST("/practices/:id/reset", h.ResetDocumentationPracticeEnvironment)
-	documentationRoutes.POST("/practices/:id/terminal-ticket", h.CreatePracticeTerminalTicket)
 	// The blank practice scenario is a per-user session verb scoped to the
 	// pinned library: one environment per user, carried across every page.
 	documentationRoutes.GET("/scenario", h.GetDocumentationScenario)
@@ -167,119 +155,13 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	documentationRoutes.POST("/scenario/reset", h.ResetDocumentationScenario)
 	documentationRoutes.DELETE("/scenario", h.StopDocumentationScenario)
 	documentationRoutes.POST("/scenario/terminal-ticket", h.CreateBlankScenarioTerminalTicket)
-	router.GET("/api/documentation/scenario/terminal", h.HandleBlankScenarioTerminalTicket)
 	// The terminal WebSocket authenticates with the one-time ticket instead of
 	// the JWT, exactly like the operations terminal.
-	router.GET("/api/documentation/practices/:id/terminal", h.HandlePracticeTerminalTicket)
+	router.GET("/api/documentation/scenario/terminal", h.HandleBlankScenarioTerminalTicket)
 	adminRoutes := router.Group("/api/admin")
 	adminRoutes.Use(jwtMW, middleware.RequireAdmin())
 	adminRoutes.GET("/users", h.ListAdminUsers)
 	adminRoutes.POST("/users/:id/totp-reset", h.ResetAdminUserTOTP)
-	adminRoutes.POST("/documentation/batches", middleware.RequireAdmin(), h.CreateAdminDocumentationBatch)
-	adminRoutes.GET("/documentation/batches", func(c *gin.Context) {
-		params := api.ListAdminDocumentationBatchesParams{}
-		if raw := c.Query("limit"); raw != "" {
-			parsed, err := strconv.Atoi(raw)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid batch list limit"})
-				return
-			}
-			params.Limit = &parsed
-		}
-		h.ListAdminDocumentationBatches(c, params)
-	})
-	adminRoutes.POST("/documentation/batches/:batch_id/pause", func(c *gin.Context) {
-		h.PauseAdminDocumentationBatch(c, c.Param("batch_id"))
-	})
-	adminRoutes.POST("/documentation/batches/:batch_id/resume", func(c *gin.Context) {
-		h.ResumeAdminDocumentationBatch(c, c.Param("batch_id"))
-	})
-	adminRoutes.POST("/documentation/batches/:batch_id/cancel", func(c *gin.Context) {
-		h.CancelAdminDocumentationBatch(c, c.Param("batch_id"))
-	})
-	adminRoutes.POST("/documentation/batches/:batch_id/retry-failed", func(c *gin.Context) {
-		h.RetryFailedAdminDocumentationBatchItems(c, c.Param("batch_id"))
-	})
-	adminRoutes.GET("/documentation/batches/:batch_id", func(c *gin.Context) {
-		h.GetAdminDocumentationBatch(c, c.Param("batch_id"))
-	})
-	adminRoutes.GET("/documentation/batches/:batch_id/items", func(c *gin.Context) {
-		params := api.ListAdminDocumentationBatchItemsParams{}
-		if raw := c.Query("limit"); raw != "" {
-			parsed, err := strconv.Atoi(raw)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid batch item limit"})
-				return
-			}
-			params.Limit = &parsed
-		}
-		if raw := c.Query("cursor"); raw != "" {
-			params.Cursor = &raw
-		}
-		if raw := c.Query("state"); raw != "" {
-			params.State = (*api.ListAdminDocumentationBatchItemsParamsState)(&raw)
-		}
-		h.ListAdminDocumentationBatchItems(c, c.Param("batch_id"), params)
-	})
-	adminRoutes.GET("/documentation/corpus", func(c *gin.Context) {
-		params := api.ListAdminDocumentationCorpusParams{}
-		if raw := c.Query("limit"); raw != "" {
-			parsed, err := strconv.Atoi(raw)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid corpus page limit"})
-				return
-			}
-			params.Limit = &parsed
-		}
-		if raw := c.Query("cursor"); raw != "" {
-			params.Cursor = &raw
-		}
-		if raw := c.Query("section"); raw != "" {
-			params.Section = &raw
-		}
-		if raw := c.Query("search"); raw != "" {
-			params.Search = &raw
-		}
-		if raw := c.Query("failures"); raw != "" {
-			parsed, err := strconv.ParseBool(raw)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid corpus failures filter"})
-				return
-			}
-			params.Failures = &parsed
-		}
-		h.ListAdminDocumentationCorpus(c, params)
-	})
-	adminRoutes.GET("/documentation/workflows", func(c *gin.Context) {
-		params := api.ListAdminDocumentationWorkflowsParams{}
-		if raw := c.Query("limit"); raw != "" {
-			parsed, err := strconv.Atoi(raw)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: "invalid workflow page limit"})
-				return
-			}
-			params.Limit = &parsed
-		}
-		if raw := c.Query("cursor"); raw != "" {
-			params.Cursor = &raw
-		}
-		if raw := c.Query("state"); raw != "" {
-			params.State = &raw
-		}
-		if raw := c.Query("page_path"); raw != "" {
-			params.PagePath = &raw
-		}
-		h.ListAdminDocumentationWorkflows(c, params)
-	})
-	adminRoutes.GET("/documentation/workflows/:workflow_id", func(c *gin.Context) {
-		h.GetAdminDocumentationWorkflow(c, c.Param("workflow_id"))
-	})
-	adminRoutes.POST("/documentation/workflows/:workflow_id/force-fail", func(c *gin.Context) {
-		h.ForceFailAdminDocumentationWorkflow(c, c.Param("workflow_id"))
-	})
-	adminRoutes.POST("/documentation/workflows/:workflow_id/restart", func(c *gin.Context) {
-		h.RestartAdminDocumentationWorkflow(c, c.Param("workflow_id"))
-	})
 	adminRoutes.GET("/environments", h.ListAdminEnvironments)
 	adminRoutes.POST("/environments/:name/release", func(c *gin.Context) {
 		h.ReleaseAdminEnvironment(c, c.Param("name"))

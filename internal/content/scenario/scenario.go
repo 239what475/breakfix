@@ -10,7 +10,8 @@ import (
 
 // ScenarioType retains the serialized type of historical Scenario revisions.
 // New operations Catalog and authoring entry points accept only
-// ScenarioOperationsScenario; documentation practice has its own model.
+// ScenarioOperationsScenario; the documentation practice ground is a blank
+// environment, not a scenario type.
 type ScenarioType string
 
 const (

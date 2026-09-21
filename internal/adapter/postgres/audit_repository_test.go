@@ -45,14 +45,14 @@ func TestListHumanActionsFiltersAndPagesByKeyset(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 9, 17, 10, 0, 0, 0, time.UTC)
 	rows := []audit.HumanAction{
-		{ID: "audit-1", UserID: "u-admin", Action: audit.ActionDocumentationPracticeStart, TargetType: audit.TargetDocumentWorkflow, TargetID: "wf-1", Detail: json.RawMessage(`{}`), CreatedAt: base},
+		{ID: "audit-1", UserID: "u-admin", Action: audit.ActionEnvironmentRelease, TargetType: audit.TargetRuntimeEnvironment, TargetID: "wf-1", Detail: json.RawMessage(`{}`), CreatedAt: base},
 		{ID: "audit-2", UserID: "u-admin", Action: audit.ActionUserTOTPReset, TargetType: audit.TargetUser, TargetID: "u-victim", Detail: json.RawMessage(`{}`), CreatedAt: base.Add(time.Minute)},
-		{ID: "audit-3", UserID: "u-other", Action: audit.ActionDocumentationPracticeStart, TargetType: audit.TargetDocumentWorkflow, TargetID: "wf-2", Detail: json.RawMessage(`{}`), CreatedAt: base.Add(2 * time.Minute)},
-		{ID: "audit-4", UserID: "u-admin", Action: audit.ActionDocumentationWorkflowForceFail, TargetType: audit.TargetDocumentWorkflow, TargetID: "wf-1", Detail: json.RawMessage(`{"reason":"stuck"}`), CreatedAt: base.Add(3 * time.Minute)},
+		{ID: "audit-3", UserID: "u-other", Action: audit.ActionEnvironmentRelease, TargetType: audit.TargetRuntimeEnvironment, TargetID: "wf-2", Detail: json.RawMessage(`{}`), CreatedAt: base.Add(2 * time.Minute)},
+		{ID: "audit-4", UserID: "u-admin", Action: audit.ActionUserTOTPReset, TargetType: audit.TargetRuntimeEnvironment, TargetID: "wf-1", Detail: json.RawMessage(`{"reason":"stuck"}`), CreatedAt: base.Add(3 * time.Minute)},
 	}
 	seedHumanActions(t, database, rows...)
 
-	byAction, err := database.Audit.ListHumanActions(ctx, HumanActionFilter{Action: audit.ActionDocumentationPracticeStart, Limit: 10})
+	byAction, err := database.Audit.ListHumanActions(ctx, HumanActionFilter{Action: audit.ActionEnvironmentRelease, Limit: 10})
 	if err != nil {
 		t.Fatalf("list by action: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestListHumanActionsFiltersAndPagesByKeyset(t *testing.T) {
 		t.Fatalf("user filter rows = %#v", byUser)
 	}
 
-	combined, err := database.Audit.ListHumanActions(ctx, HumanActionFilter{Action: audit.ActionDocumentationPracticeStart, UserID: "u-other", Limit: 10})
+	combined, err := database.Audit.ListHumanActions(ctx, HumanActionFilter{Action: audit.ActionEnvironmentRelease, UserID: "u-other", Limit: 10})
 	if err != nil {
 		t.Fatalf("list combined: %v", err)
 	}

@@ -37,7 +37,7 @@ case "$suite" in
 	ui|node|k8s|recovery|documentation|admin|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak)
 		;;
 	*)
-		printf 'Usage: %s {ui|node|k8s|recovery|documentation|admin|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak}\n' "$0" >&2
+		printf 'Usage: %s {ui|node|k8s|recovery|documentation|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak}\n' "$0" >&2
 		exit 2
 		;;
 esac
@@ -226,16 +226,11 @@ run_suite() {
 		recovery)
 			npm run test:e2e:recovery --prefix "$repo_root/test"
 			;;
-			documentation)
-				[ "${RUN_AGENT_LIVE_E2E:-}" = 1 ] ||
-					fail 'documentation requires RUN_AGENT_LIVE_E2E=1; this suite drives the documentation pipeline with the real model'
-				npm run test:e2e:documentation --prefix "$repo_root/test"
-				;;
-			admin)
-				[ "${RUN_AGENT_LIVE_E2E:-}" = 1 ] ||
-					fail 'admin requires RUN_AGENT_LIVE_E2E=1; this suite drives documentation batches with the real model'
-				npm run test:e2e:admin --prefix "$repo_root/test"
-				;;
+		documentation)
+			# The blank practice scenario needs no model: it provisions real
+			# vk8s environments, which the prepared Kind target provides.
+			npm run test:e2e:documentation --prefix "$repo_root/test"
+			;;
 		acceptance-node)
 			[ "${RUN_AGENT_LIVE_E2E:-}" = 1 ] ||
 				fail 'acceptance-node requires RUN_AGENT_LIVE_E2E=1; this suite calls the real model and OpenSandbox'

@@ -8,7 +8,6 @@ import (
 
 	runtimev2 "github.com/breakfix/breakfix/api/v2"
 	docsource "github.com/breakfix/breakfix/internal/adapter/documentation"
-	documentdomain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
@@ -28,8 +27,8 @@ func (fakeBlankScenarioLibrary) ReadDocumentTree(string) ([]docsource.DocumentTr
 func (fakeBlankScenarioLibrary) ReadDocumentAsset(string) ([]byte, string, error) {
 	return nil, "", nil
 }
-func (fakeBlankScenarioLibrary) PinnedContext() documentdomain.DocumentContext {
-	return documentdomain.DocumentContext{SourceID: "kubernetes-io", Commit: "commit-01", Language: "en"}
+func (fakeBlankScenarioLibrary) PinnedContext() docsource.DocumentContext {
+	return docsource.DocumentContext{SourceID: "kubernetes-io", Commit: "commit-01", Language: "en"}
 }
 
 func newBlankScenarioHandler(t *testing.T, state *environmentAPITestState) *Handler {

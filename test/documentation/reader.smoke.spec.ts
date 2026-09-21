@@ -12,17 +12,16 @@ async function gotoReader(page: Page, readerUrl: string) {
 }
 
 // Thin smoke of what only a real browser can carry: the generated content
-// contract produced by the external docs-project generator, the
-// viewport-driven outline drawer, and the practice entry's presence on the
-// pinned page. Navigation, URL/hash sync, retries, and fallbacks live in the
-// vitest reader tier; this project runs after the practice chain so the
-// published practice exists.
-test("the reader renders the generated corpus and gates the practice entry by viewport", async ({ page }) => {
+// contract produced by the external docs-project generator and the
+// viewport-driven outline drawer. Navigation, URL/hash sync, retries, and the
+// blank scenario session behavior live in the vitest reader tier and the
+// scenario e2e suite.
+test("the reader renders the generated corpus and moves the outline by viewport", async ({ page }) => {
   test.setTimeout(3 * 60_000);
 
-  // Desktop: walk the outline to the pinned practice page. The heading
-  // anchors, alert blockquotes, and shiki code blocks come from the offline
-  // generator - this repository has no lower tier that could hold them.
+  // Desktop: walk the outline to a pinned page. The heading anchors, alert
+  // blockquotes, and shiki code blocks come from the offline generator -
+  // this repository has no lower tier that could hold them.
   await gotoReader(page, entryUrl);
   await page.getByRole("button", { name: "Toggle Concepts section" }).click();
   await page.getByRole("button", { name: "Toggle Workloads section" }).click();
@@ -35,17 +34,15 @@ test("the reader renders the generated corpus and gates the practice entry by vi
   await expect(article.locator("blockquote.doc-alert-note").first()).toBeVisible();
   await expect(article.locator("blockquote.doc-alert-caution").first()).toBeVisible();
   await expect(article.locator("pre.shiki").first()).toBeVisible();
-  // Exactly the published anchor carries the practice entry.
-  await expect(article.locator("h2#pod-lifetime .practice-anchor-button")).toBeVisible();
-  await expect(article.locator(".practice-anchor-button")).toHaveCount(1);
+  // The anonymous toolbar is present but inert without a session.
+  await expect(page.locator(".scenario-toolbar-badge")).toHaveText("No scenario");
 
-  // Mobile viewport: the entry disappears and the outline moves into the
+  // Mobile viewport: the toolbar disappears and the outline moves into the
   // menu drawer.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
   await expect(page.locator(".documentation-article")).toBeVisible();
-  await expect(page.locator(".practice-anchor-button")).toBeHidden();
-  await expect(page.locator(".practice-panel")).toHaveCount(0);
+  await expect(page.locator(".scenario-toolbar")).toBeHidden();
   await page.getByRole("button", { name: "Contents", exact: true }).click();
   await expect(page.getByRole("navigation", { name: "Documentation outline" })).toBeVisible();
   await page.getByRole("button", { name: "Close documentation outline" }).click();
@@ -55,4 +52,8 @@ test("the reader renders the generated corpus and gates the practice entry by vi
   await page.goto(`${apiBase}/`);
   await page.getByRole("button", { name: "Navigation", exact: true }).click();
   await expect(page.getByRole("navigation", { name: "Mobile primary" }).getByRole("button", { name: "Documentation", exact: true })).toBeVisible();
+
+  // Deep links restore the pinned page directly.
+  await gotoReader(page, podLifecycleUrl);
+  await expect(page.locator(".documentation-article").locator("h2#pod-lifetime")).toBeVisible();
 });

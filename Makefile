@@ -1,7 +1,7 @@
 .PHONY: generate verify-generated verify-legacy-removal web-deps web-test-unit test-deps build images documentation-library-image deploy-kind reset-kind \
 	test-unit test-race lint catalog-package e2e-prepare e2e-reset e2e-bootstrap-core test-e2e test-e2e-node test-e2e-regression \
 	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network \
-	test-e2e-documentation test-e2e-admin docs-sync docs-build docs-check docs-metadata docs-smoke \
+	test-e2e-documentation docs-sync docs-build docs-check docs-metadata docs-smoke \
 	docs-project docs-fixture
 
 VERSION ?= 0.1.0
@@ -222,12 +222,6 @@ test-e2e-recovery: test-deps
 test-e2e-documentation: test-deps
 	DOCS_PROJECT_VERSION=$(DOCS_PROJECT_VERSION) ./scripts/kind/e2e-documentation-prepare.sh
 	./scripts/kind/run-e2e.sh documentation
-
-# The admin suite owns a freshly reset target so its first registration is
-# the bootstrap admin, exactly as the acceptance flow requires.
-test-e2e-admin: test-deps
-	DOCS_PROJECT_VERSION=$(DOCS_PROJECT_VERSION) ./scripts/kind/e2e-documentation-prepare.sh
-	./scripts/kind/run-e2e.sh admin
 
 test-acceptance-node: test-deps
 	@test "$(RUN_AGENT_LIVE_E2E)" = "1" || { echo "RUN_AGENT_LIVE_E2E=1 is required for live Node acceptance" >&2; exit 2; }

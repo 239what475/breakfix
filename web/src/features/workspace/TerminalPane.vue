@@ -12,7 +12,7 @@ const props = defineProps<{
   visible: boolean;
   /** Ticket + socket plumbing for this content kind. */
   channel: TerminalChannel;
-  /** Optional server-side window close; practices have no such endpoint. */
+  /** Optional server-side window close; the blank scenario has no such endpoint. */
   closeWindow?: (window: string, node: string | undefined) => Promise<void>;
 }>();
 const emit = defineEmits<{

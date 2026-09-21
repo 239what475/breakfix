@@ -10,10 +10,7 @@ import (
 
 // ListAdminRunnableActions observes the public runnable queue. The summary
 // always describes the whole queue; the state/phase filters apply to items
-// only. Flags name the two conditions an operator must react to:
-// attempt-high marks actions nearing their retry ceiling, and
-// failed-unreconciled marks the precise "action is dead while its workflow
-// still waits" signal.
+// only. The attempt-high flag names actions nearing their retry ceiling.
 func (h *Handler) ListAdminRunnableActions(c *gin.Context, params api.ListAdminRunnableActionsParams) {
 	if h == nil || h.db == nil {
 		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "runnable queue is unavailable"})
@@ -71,26 +68,22 @@ func intSummary(counts map[string]int64) map[string]int {
 
 func adminRunnableActionItem(observation postgres.RunnableActionObservation) api.AdminRunnableActionItem {
 	flag := ""
-	if observation.State == "failed" && observation.DocumentWorkflowID != nil && observation.ReconciledAt == nil {
-		flag = "failed-unreconciled"
-	} else if observation.Attempt >= 4 {
+	if observation.Attempt >= 4 {
 		flag = "attempt-high"
 	}
 	return api.AdminRunnableActionItem{
-		ActionKey:          observation.ActionKey,
-		ContentKind:        observation.ContentKind,
-		ContentId:          observation.ContentID,
-		ContentRevision:    observation.ContentRevision,
-		Phase:              string(observation.Phase),
-		State:              observation.State,
-		Attempt:            observation.Attempt,
-		LeaseExpiresAt:     observation.LeaseExpiresAt,
-		NextRunAt:          observation.NextRunAt,
-		FailureClass:       observation.FailureClass,
-		FailureCode:        observation.FailureCode,
-		FailureSummary:     observation.FailureSummary,
-		DocumentWorkflowId: observation.DocumentWorkflowID,
-		Reconciled:         observation.ReconciledAt,
-		Flag:               api.AdminRunnableActionItemFlag(flag),
+		ActionKey:       observation.ActionKey,
+		ContentKind:     observation.ContentKind,
+		ContentId:       observation.ContentID,
+		ContentRevision: observation.ContentRevision,
+		Phase:           string(observation.Phase),
+		State:           observation.State,
+		Attempt:         observation.Attempt,
+		LeaseExpiresAt:  observation.LeaseExpiresAt,
+		NextRunAt:       observation.NextRunAt,
+		FailureClass:    observation.FailureClass,
+		FailureCode:     observation.FailureCode,
+		FailureSummary:  observation.FailureSummary,
+		Flag:            api.AdminRunnableActionItemFlag(flag),
 	}
 }

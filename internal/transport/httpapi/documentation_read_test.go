@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	docsource "github.com/breakfix/breakfix/internal/adapter/documentation"
-	documentdomain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/gin-gonic/gin"
 )
 
@@ -38,9 +37,9 @@ func (f fakeDocumentationLibrary) ReadDocumentAsset(string) ([]byte, string, err
 	return f.asset, "image/svg+xml", nil
 }
 
-func (f fakeDocumentationLibrary) PinnedContext() documentdomain.DocumentContext {
-	return documentdomain.DocumentContext{
-		FormatVersion: documentdomain.FormatVersion, SourceID: "kubernetes",
+func (f fakeDocumentationLibrary) PinnedContext() docsource.DocumentContext {
+	return docsource.DocumentContext{
+		FormatVersion: docsource.FormatVersion, SourceID: "kubernetes",
 		Repository: "https://github.com/kubernetes/website", Commit: strings.Repeat("a", 40),
 		Version: "v1.34", Language: "en", License: "CC BY 4.0", PagePath: "docs/pods.md",
 	}

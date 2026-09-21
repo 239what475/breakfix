@@ -2,7 +2,7 @@ name: Nightly
 
 # The nightly answers "is this HEAD still good" for the tiers the push fast
 # lane cannot cover: the core-profile E2E regression on a from-zero Kind
-# target, the pinned documentation pipeline, and the vK8s network isolation
+# target, the pinned documentation library, and the vK8s network isolation
 # acceptance. It skips itself when HEAD already has a green nightly (nothing
 # changed, nothing to relearn), retries automatically while a failure is
 # outstanding, and runs unconditionally on Sundays to catch drift in the

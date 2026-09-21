@@ -2,10 +2,7 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -15,51 +12,9 @@ import (
 	appoperations "github.com/breakfix/breakfix/internal/application/operations"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/content/scenario"
-	"github.com/breakfix/breakfix/internal/domain/audit"
-	documentdomain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 	scenariodomain "github.com/breakfix/breakfix/internal/domain/scenario"
-	"github.com/gin-gonic/gin"
 )
-
-func TestStartDocumentationPracticeUsesOnlyTheFixedApplicationPort(t *testing.T) {
-	application := &testDocumentationApplication{}
-	h := &Handler{documentation: application}
-	recorder := httptest.NewRecorder()
-	ginContext, _ := gin.CreateTestContext(recorder)
-	ginContext.Request = httptest.NewRequest(http.MethodPost, "/api/documentation/practice", strings.NewReader(`{"page_path":"docs/concepts/workloads/pods/pod-lifecycle","anchor":"pod-lifetime"}`))
-	ginContext.Request.Header.Set("Content-Type", "application/json")
-	h.StartDocumentationPractice(ginContext)
-	if recorder.Code != http.StatusAccepted || application.calls != 1 {
-		t.Fatalf("documentation start = %d, calls = %d, body = %s", recorder.Code, application.calls, recorder.Body.String())
-	}
-	if application.pages[0] != "docs/concepts/workloads/pods/pod-lifecycle" || application.anchors[0] != "pod-lifetime" {
-		t.Fatalf("documentation start page = %q anchor = %q", application.pages[0], application.anchors[0])
-	}
-}
-
-type testDocumentationApplication struct {
-	calls   int
-	actors  []string
-	pages   []string
-	anchors []string
-}
-
-func (a *testDocumentationApplication) StartDocumentationPractice(_ context.Context, actorID, pagePath, anchor string) (documentdomain.Workflow, error) {
-	a.calls++
-	a.actors = append(a.actors, actorID)
-	a.pages = append(a.pages, pagePath)
-	a.anchors = append(a.anchors, anchor)
-	return documentdomain.Workflow{ID: "document-workflow-01", State: documentdomain.Planning}, nil
-}
-
-func (a *testDocumentationApplication) ForceFailDocumentationWorkflow(context.Context, string, string, *audit.HumanAction) (documentdomain.Workflow, error) {
-	return documentdomain.Workflow{}, errors.New("not implemented")
-}
-
-func (a *testDocumentationApplication) RestartDocumentationWorkflow(context.Context, string, string, *audit.HumanAction) (documentdomain.Workflow, error) {
-	return documentdomain.Workflow{}, errors.New("not implemented")
-}
 
 func newHandlerForTest(t testing.TB, database *postgres.Store, client *kubernetes.Client, cfg config.Config) *Handler {
 	t.Helper()

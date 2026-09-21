@@ -21,20 +21,19 @@ var errNoActiveAssistantEnvironment = errors.New("no active environment for assi
 
 const (
 	// environmentContentOperations is the content-kind label of environments
-	// pinned to Operations scenarios; environmentContentDocumentationPractice
-	// matches the runnable Kind of published documentation practices;
-	// environmentContentDocumentationBlank pins the library-scoped blank
-	// practice environment each reader may run alongside the documentation.
-	environmentContentOperations            = "operations"
-	environmentContentDocumentationPractice = "documentation-practice"
-	environmentContentDocumentationBlank    = "documentation-blank"
+	// pinned to Operations scenarios; environmentContentDocumentationBlank
+	// pins the library-scoped blank practice environment each reader may run
+	// alongside the documentation.
+	environmentContentOperations         = "operations"
+	environmentContentDocumentationBlank = "documentation-blank"
 )
 
 // environmentContentTarget is the content identity one learning environment is
 // pinned to, regardless of kind. Operations scenarios build it from their
-// catalog entry; published documentation practices build it from their
-// immutable revision. Both kinds share the find-or-create path and differ
-// only in labels and in how their runnable revision binding resolves.
+// catalog entry and resolve an immutable runnable revision; the blank
+// documentation scenario binds the pinned library directly and names no
+// revision. Both kinds share the find-or-create path and differ only in
+// labels and in how their binding resolves.
 type environmentContentTarget struct {
 	kind       string
 	id         string

@@ -3,9 +3,9 @@ set -eu
 
 # One prepare serves the whole chain; k8s and ui append without another
 # prepare, and node and recovery join only under the full profile because
-# their scenarios drive Incus-backed environments. The documentation and
-# admin suites are live acceptance (real model) and run through their own
-# entry points, not this chain.
+# their scenarios drive Incus-backed environments. The documentation suite
+# owns a freshly prepared library target and runs through its own entry
+# point, not this chain.
 
 repo_root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 prepare=$repo_root/scripts/kind/e2e-prepare.sh

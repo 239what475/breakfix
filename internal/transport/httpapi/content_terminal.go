@@ -14,32 +14,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// CreatePracticeTerminalTicket mints the one-time ticket a browser exchanges
-// for the practice terminal WebSocket. It mirrors the operations endpoint and
-// reuses the same ticket storage; the practice identifier rides the generic
-// content column.
-func (h *Handler) CreatePracticeTerminalTicket(c *gin.Context) {
-	target, ok := h.resolvePracticeTarget(c, c.Param("id"))
-	if !ok {
-		return
-	}
-	h.createContentTerminalTicket(c, target, c.Param("id"))
-}
-
-// HandlePracticeTerminalTicket upgrades the one-time ticket to a terminal
-// WebSocket with the same origin allowlist, resize/data/ready protocol, and
-// connection-scoped lease renewal as the operations terminal.
-func (h *Handler) HandlePracticeTerminalTicket(c *gin.Context) {
-	target, ok := h.resolvePracticeTarget(c, c.Param("id"))
-	if !ok {
-		return
-	}
-	h.handleContentTerminalTicket(c, target, c.Param("id"))
-}
-
 // createContentTerminalTicket mints the one-time ticket for whichever content
-// target owns the environment: a published practice or the reader's blank
-// documentation scenario.
+// target owns the environment: today the reader's blank documentation
+// scenario.
 func (h *Handler) createContentTerminalTicket(c *gin.Context, target environmentContentTarget, contentID string) {
 	user := h.requireUser(c)
 	if user == nil {

@@ -41,135 +41,6 @@ func (e AdminCatalogIntegrityState) Valid() bool {
 	}
 }
 
-// Defines values for AdminDocumentBatchState.
-const (
-	AdminDocumentBatchStateCancelled AdminDocumentBatchState = "Cancelled"
-	AdminDocumentBatchStateCompleted AdminDocumentBatchState = "Completed"
-	AdminDocumentBatchStatePaused    AdminDocumentBatchState = "Paused"
-	AdminDocumentBatchStatePending   AdminDocumentBatchState = "Pending"
-	AdminDocumentBatchStateRunning   AdminDocumentBatchState = "Running"
-)
-
-// Valid indicates whether the value is a known member of the AdminDocumentBatchState enum.
-func (e AdminDocumentBatchState) Valid() bool {
-	switch e {
-	case AdminDocumentBatchStateCancelled:
-		return true
-	case AdminDocumentBatchStateCompleted:
-		return true
-	case AdminDocumentBatchStatePaused:
-		return true
-	case AdminDocumentBatchStatePending:
-		return true
-	case AdminDocumentBatchStateRunning:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AdminDocumentBatchItemState.
-const (
-	AdminDocumentBatchItemStateCancelled  AdminDocumentBatchItemState = "Cancelled"
-	AdminDocumentBatchItemStateFailed     AdminDocumentBatchItemState = "Failed"
-	AdminDocumentBatchItemStateNoPractice AdminDocumentBatchItemState = "NoPractice"
-	AdminDocumentBatchItemStatePending    AdminDocumentBatchItemState = "Pending"
-	AdminDocumentBatchItemStatePublished  AdminDocumentBatchItemState = "Published"
-	AdminDocumentBatchItemStateRejected   AdminDocumentBatchItemState = "Rejected"
-	AdminDocumentBatchItemStateRunning    AdminDocumentBatchItemState = "Running"
-	AdminDocumentBatchItemStateScheduled  AdminDocumentBatchItemState = "Scheduled"
-	AdminDocumentBatchItemStateSkipped    AdminDocumentBatchItemState = "Skipped"
-)
-
-// Valid indicates whether the value is a known member of the AdminDocumentBatchItemState enum.
-func (e AdminDocumentBatchItemState) Valid() bool {
-	switch e {
-	case AdminDocumentBatchItemStateCancelled:
-		return true
-	case AdminDocumentBatchItemStateFailed:
-		return true
-	case AdminDocumentBatchItemStateNoPractice:
-		return true
-	case AdminDocumentBatchItemStatePending:
-		return true
-	case AdminDocumentBatchItemStatePublished:
-		return true
-	case AdminDocumentBatchItemStateRejected:
-		return true
-	case AdminDocumentBatchItemStateRunning:
-		return true
-	case AdminDocumentBatchItemStateScheduled:
-		return true
-	case AdminDocumentBatchItemStateSkipped:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AdminDocumentBatchResolutionExcludedReason.
-const (
-	Duplicate AdminDocumentBatchResolutionExcludedReason = "duplicate"
-	Index     AdminDocumentBatchResolutionExcludedReason = "index"
-	NoAnchor  AdminDocumentBatchResolutionExcludedReason = "no-anchor"
-)
-
-// Valid indicates whether the value is a known member of the AdminDocumentBatchResolutionExcludedReason enum.
-func (e AdminDocumentBatchResolutionExcludedReason) Valid() bool {
-	switch e {
-	case Duplicate:
-		return true
-	case Index:
-		return true
-	case NoAnchor:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AdminDocumentBatchScopeKind.
-const (
-	Full     AdminDocumentBatchScopeKind = "full"
-	Pages    AdminDocumentBatchScopeKind = "pages"
-	Sections AdminDocumentBatchScopeKind = "sections"
-)
-
-// Valid indicates whether the value is a known member of the AdminDocumentBatchScopeKind enum.
-func (e AdminDocumentBatchScopeKind) Valid() bool {
-	switch e {
-	case Full:
-		return true
-	case Pages:
-		return true
-	case Sections:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for AdminDocumentationWorkflowStuckReason.
-const (
-	ActionFailed      AdminDocumentationWorkflowStuckReason = "action_failed"
-	AttemptsExhausted AdminDocumentationWorkflowStuckReason = "attempts_exhausted"
-	DwellTimeout      AdminDocumentationWorkflowStuckReason = "dwell_timeout"
-)
-
-// Valid indicates whether the value is a known member of the AdminDocumentationWorkflowStuckReason enum.
-func (e AdminDocumentationWorkflowStuckReason) Valid() bool {
-	switch e {
-	case ActionFailed:
-		return true
-	case AttemptsExhausted:
-		return true
-	case DwellTimeout:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for AdminEnvironmentPurpose.
 const (
 	Learning     AdminEnvironmentPurpose = "learning"
@@ -190,16 +61,16 @@ func (e AdminEnvironmentPurpose) Valid() bool {
 
 // Defines values for AdminEnvironmentFailureClass.
 const (
-	Artifact       AdminEnvironmentFailureClass = "artifact"
-	Infrastructure AdminEnvironmentFailureClass = "infrastructure"
+	AdminEnvironmentFailureClassArtifact       AdminEnvironmentFailureClass = "artifact"
+	AdminEnvironmentFailureClassInfrastructure AdminEnvironmentFailureClass = "infrastructure"
 )
 
 // Valid indicates whether the value is a known member of the AdminEnvironmentFailureClass enum.
 func (e AdminEnvironmentFailureClass) Valid() bool {
 	switch e {
-	case Artifact:
+	case AdminEnvironmentFailureClassArtifact:
 		return true
-	case Infrastructure:
+	case AdminEnvironmentFailureClassInfrastructure:
 		return true
 	default:
 		return false
@@ -208,40 +79,16 @@ func (e AdminEnvironmentFailureClass) Valid() bool {
 
 // Defines values for AdminHumanActionAction.
 const (
-	AdminHumanActionActionDocumentationBatchCancel       AdminHumanActionAction = "documentation.batch.cancel"
-	AdminHumanActionActionDocumentationBatchCreate       AdminHumanActionAction = "documentation.batch.create"
-	AdminHumanActionActionDocumentationBatchPause        AdminHumanActionAction = "documentation.batch.pause"
-	AdminHumanActionActionDocumentationBatchResume       AdminHumanActionAction = "documentation.batch.resume"
-	AdminHumanActionActionDocumentationBatchRetry        AdminHumanActionAction = "documentation.batch.retry"
-	AdminHumanActionActionDocumentationPracticeStart     AdminHumanActionAction = "documentation.practice.start"
-	AdminHumanActionActionDocumentationWorkflowForceFail AdminHumanActionAction = "documentation.workflow.force_fail"
-	AdminHumanActionActionDocumentationWorkflowRestart   AdminHumanActionAction = "documentation.workflow.restart"
-	AdminHumanActionActionEnvironmentRelease             AdminHumanActionAction = "environment.release"
-	AdminHumanActionActionUserTotpReset                  AdminHumanActionAction = "user.totp.reset"
+	EnvironmentRelease AdminHumanActionAction = "environment.release"
+	UserTotpReset      AdminHumanActionAction = "user.totp.reset"
 )
 
 // Valid indicates whether the value is a known member of the AdminHumanActionAction enum.
 func (e AdminHumanActionAction) Valid() bool {
 	switch e {
-	case AdminHumanActionActionDocumentationBatchCancel:
+	case EnvironmentRelease:
 		return true
-	case AdminHumanActionActionDocumentationBatchCreate:
-		return true
-	case AdminHumanActionActionDocumentationBatchPause:
-		return true
-	case AdminHumanActionActionDocumentationBatchResume:
-		return true
-	case AdminHumanActionActionDocumentationBatchRetry:
-		return true
-	case AdminHumanActionActionDocumentationPracticeStart:
-		return true
-	case AdminHumanActionActionDocumentationWorkflowForceFail:
-		return true
-	case AdminHumanActionActionDocumentationWorkflowRestart:
-		return true
-	case AdminHumanActionActionEnvironmentRelease:
-		return true
-	case AdminHumanActionActionUserTotpReset:
+	case UserTotpReset:
 		return true
 	default:
 		return false
@@ -250,9 +97,8 @@ func (e AdminHumanActionAction) Valid() bool {
 
 // Defines values for AdminRunnableActionItemFlag.
 const (
-	AdminRunnableActionItemFlagAttemptHigh        AdminRunnableActionItemFlag = "attempt-high"
-	AdminRunnableActionItemFlagEmpty              AdminRunnableActionItemFlag = ""
-	AdminRunnableActionItemFlagFailedUnreconciled AdminRunnableActionItemFlag = "failed-unreconciled"
+	AdminRunnableActionItemFlagAttemptHigh AdminRunnableActionItemFlag = "attempt-high"
+	AdminRunnableActionItemFlagEmpty       AdminRunnableActionItemFlag = ""
 )
 
 // Valid indicates whether the value is a known member of the AdminRunnableActionItemFlag enum.
@@ -261,8 +107,6 @@ func (e AdminRunnableActionItemFlag) Valid() bool {
 	case AdminRunnableActionItemFlagAttemptHigh:
 		return true
 	case AdminRunnableActionItemFlagEmpty:
-		return true
-	case AdminRunnableActionItemFlagFailedUnreconciled:
 		return true
 	default:
 		return false
@@ -767,45 +611,6 @@ func (e ScenarioSummaryRuntime) Valid() bool {
 	}
 }
 
-// Defines values for ListAdminDocumentationBatchItemsParamsState.
-const (
-	ListAdminDocumentationBatchItemsParamsStateCancelled  ListAdminDocumentationBatchItemsParamsState = "Cancelled"
-	ListAdminDocumentationBatchItemsParamsStateFailed     ListAdminDocumentationBatchItemsParamsState = "Failed"
-	ListAdminDocumentationBatchItemsParamsStateNoPractice ListAdminDocumentationBatchItemsParamsState = "NoPractice"
-	ListAdminDocumentationBatchItemsParamsStatePending    ListAdminDocumentationBatchItemsParamsState = "Pending"
-	ListAdminDocumentationBatchItemsParamsStatePublished  ListAdminDocumentationBatchItemsParamsState = "Published"
-	ListAdminDocumentationBatchItemsParamsStateRejected   ListAdminDocumentationBatchItemsParamsState = "Rejected"
-	ListAdminDocumentationBatchItemsParamsStateRunning    ListAdminDocumentationBatchItemsParamsState = "Running"
-	ListAdminDocumentationBatchItemsParamsStateScheduled  ListAdminDocumentationBatchItemsParamsState = "Scheduled"
-	ListAdminDocumentationBatchItemsParamsStateSkipped    ListAdminDocumentationBatchItemsParamsState = "Skipped"
-)
-
-// Valid indicates whether the value is a known member of the ListAdminDocumentationBatchItemsParamsState enum.
-func (e ListAdminDocumentationBatchItemsParamsState) Valid() bool {
-	switch e {
-	case ListAdminDocumentationBatchItemsParamsStateCancelled:
-		return true
-	case ListAdminDocumentationBatchItemsParamsStateFailed:
-		return true
-	case ListAdminDocumentationBatchItemsParamsStateNoPractice:
-		return true
-	case ListAdminDocumentationBatchItemsParamsStatePending:
-		return true
-	case ListAdminDocumentationBatchItemsParamsStatePublished:
-		return true
-	case ListAdminDocumentationBatchItemsParamsStateRejected:
-		return true
-	case ListAdminDocumentationBatchItemsParamsStateRunning:
-		return true
-	case ListAdminDocumentationBatchItemsParamsStateScheduled:
-		return true
-	case ListAdminDocumentationBatchItemsParamsStateSkipped:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for ListAdminRunnableActionsParamsState.
 const (
 	ListAdminRunnableActionsParamsStateCompleted ListAdminRunnableActionsParamsState = "completed"
@@ -928,131 +733,6 @@ type AdminCatalogIntegrity struct {
 // AdminCatalogIntegrityState defines model for AdminCatalogIntegrity.State.
 type AdminCatalogIntegrityState string
 
-// AdminDocumentBatch defines model for AdminDocumentBatch.
-type AdminDocumentBatch struct {
-	Concurrency int `json:"concurrency"`
-
-	// Counts Item counts per state; absent states have zero items
-	Counts     *map[string]int              `json:"counts,omitempty"`
-	CreatedAt  time.Time                    `json:"created_at"`
-	CreatedBy  string                       `json:"created_by"`
-	Id         string                       `json:"id"`
-	Resolution AdminDocumentBatchResolution `json:"resolution"`
-	Scope      AdminDocumentBatchScope      `json:"scope"`
-	State      AdminDocumentBatchState      `json:"state"`
-	TotalItems int                          `json:"total_items"`
-	UpdatedAt  time.Time                    `json:"updated_at"`
-}
-
-// AdminDocumentBatchState defines model for AdminDocumentBatch.State.
-type AdminDocumentBatchState string
-
-// AdminDocumentBatchAnchorRef defines model for AdminDocumentBatchAnchorRef.
-type AdminDocumentBatchAnchorRef struct {
-	Anchor   string `json:"anchor"`
-	PagePath string `json:"page_path"`
-}
-
-// AdminDocumentBatchItem defines model for AdminDocumentBatchItem.
-type AdminDocumentBatchItem struct {
-	Anchor    string    `json:"anchor"`
-	BatchId   string    `json:"batch_id"`
-	CreatedAt time.Time `json:"created_at"`
-
-	// Detail Skip or failure summary when applicable
-	Detail     *string                     `json:"detail,omitempty"`
-	Id         string                      `json:"id"`
-	Ordinal    int                         `json:"ordinal"`
-	PagePath   string                      `json:"page_path"`
-	State      AdminDocumentBatchItemState `json:"state"`
-	Title      string                      `json:"title"`
-	UpdatedAt  time.Time                   `json:"updated_at"`
-	WorkflowId string                      `json:"workflow_id"`
-}
-
-// AdminDocumentBatchItemState defines model for AdminDocumentBatchItem.State.
-type AdminDocumentBatchItemState string
-
-// AdminDocumentBatchItemsPage defines model for AdminDocumentBatchItemsPage.
-type AdminDocumentBatchItemsPage struct {
-	Items []AdminDocumentBatchItem `json:"items"`
-
-	// NextCursor Present when another page exists
-	NextCursor *string `json:"next_cursor,omitempty"`
-}
-
-// AdminDocumentBatchList defines model for AdminDocumentBatchList.
-type AdminDocumentBatchList struct {
-	Batches []AdminDocumentBatch `json:"batches"`
-}
-
-// AdminDocumentBatchResolution defines model for AdminDocumentBatchResolution.
-type AdminDocumentBatchResolution struct {
-	// Excluded Pages dropped by the deterministic resolution with the reason
-	Excluded *[]struct {
-		PagePath string                                     `json:"page_path"`
-		Reason   AdminDocumentBatchResolutionExcludedReason `json:"reason"`
-	} `json:"excluded,omitempty"`
-	ResolvedPages int `json:"resolved_pages"`
-}
-
-// AdminDocumentBatchResolutionExcludedReason defines model for AdminDocumentBatchResolution.Excluded.Reason.
-type AdminDocumentBatchResolutionExcludedReason string
-
-// AdminDocumentBatchScope defines model for AdminDocumentBatchScope.
-type AdminDocumentBatchScope struct {
-	Kind AdminDocumentBatchScopeKind `json:"kind"`
-
-	// Overrides Explicit (page, anchor) pairs that replace the level-2 anchor rule for their page
-	Overrides *[]AdminDocumentBatchAnchorRef `json:"overrides,omitempty"`
-
-	// Pages Explicit page paths for kind=pages
-	Pages *[]string `json:"pages,omitempty"`
-
-	// Sections Library tree node paths for kind=sections
-	Sections *[]string `json:"sections,omitempty"`
-}
-
-// AdminDocumentBatchScopeKind defines model for AdminDocumentBatchScope.Kind.
-type AdminDocumentBatchScopeKind string
-
-// AdminDocumentationAgentAudit defines model for AdminDocumentationAgentAudit.
-type AdminDocumentationAgentAudit struct {
-	CreatedAt     time.Time `json:"created_at"`
-	InputDigest   string    `json:"input_digest"`
-	Model         string    `json:"model"`
-	OutputDigest  string    `json:"output_digest"`
-	PolicyVersion string    `json:"policy_version"`
-	PromptVersion string    `json:"prompt_version"`
-	Role          string    `json:"role"`
-	RunId         string    `json:"run_id"`
-	ToolVersion   string    `json:"tool_version"`
-}
-
-// AdminDocumentationCorpusPage defines model for AdminDocumentationCorpusPage.
-type AdminDocumentationCorpusPage struct {
-	Items []AdminDocumentationCorpusPageRow `json:"items"`
-
-	// NextCursor Present when another page exists
-	NextCursor *string `json:"next_cursor,omitempty"`
-}
-
-// AdminDocumentationCorpusPageRow defines model for AdminDocumentationCorpusPageRow.
-type AdminDocumentationCorpusPageRow struct {
-	Failed     int    `json:"failed"`
-	InProgress int    `json:"in_progress"`
-	NoPractice int    `json:"no_practice"`
-	PagePath   string `json:"page_path"`
-	Published  int    `json:"published"`
-
-	// Stuck Failed workflows plus workflows past their state class dwell budget
-	Stuck int    `json:"stuck"`
-	Title string `json:"title"`
-
-	// Total Workflows practicing this page
-	Total int `json:"total"`
-}
-
 // AdminDocumentationDeployment defines model for AdminDocumentationDeployment.
 type AdminDocumentationDeployment struct {
 	Language string `json:"language"`
@@ -1067,90 +747,6 @@ type AdminDocumentationDeployment struct {
 	UpstreamCommit *string `json:"upstream_commit,omitempty"`
 	Version        string  `json:"version"`
 }
-
-// AdminDocumentationLedgerEntry defines model for AdminDocumentationLedgerEntry.
-type AdminDocumentationLedgerEntry struct {
-	ContentRevision string    `json:"content_revision"`
-	CreatedAt       time.Time `json:"created_at"`
-	Digest          string    `json:"digest"`
-	Id              string    `json:"id"`
-	Kind            string    `json:"kind"`
-	OwnerRole       string    `json:"owner_role"`
-	ParentId        *string   `json:"parent_id,omitempty"`
-	PolicyVersion   *string   `json:"policy_version,omitempty"`
-	SchemaVersion   string    `json:"schema_version"`
-}
-
-// AdminDocumentationPublication defines model for AdminDocumentationPublication.
-type AdminDocumentationPublication struct {
-	CreatedAt      time.Time              `json:"created_at"`
-	Id             string                 `json:"id"`
-	Manifest       map[string]interface{} `json:"manifest"`
-	ManifestDigest string                 `json:"manifest_digest"`
-}
-
-// AdminDocumentationWorkflow defines model for AdminDocumentationWorkflow.
-type AdminDocumentationWorkflow struct {
-	// Anchor Heading anchor on the page; empty for page-level practices
-	Anchor       *string `json:"anchor,omitempty"`
-	DwellSeconds int     `json:"dwell_seconds"`
-	Id           string  `json:"id"`
-
-	// PagePath Documentation page the workflow practices
-	PagePath     *string                         `json:"page_path,omitempty"`
-	Revision     int                             `json:"revision"`
-	State        string                          `json:"state"`
-	StateVersion int                             `json:"state_version"`
-	Stuck        AdminDocumentationWorkflowStuck `json:"stuck"`
-
-	// Title Page title resolved server-side from the library manifest
-	Title *string `json:"title,omitempty"`
-
-	// UpdatedAt State entry time; dwell_seconds is measured from it
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-// AdminDocumentationWorkflowDetail defines model for AdminDocumentationWorkflowDetail.
-type AdminDocumentationWorkflowDetail struct {
-	AgentAudits []AdminDocumentationAgentAudit `json:"agent_audits"`
-
-	// Anchor Heading anchor on the page; empty for page-level practices
-	Anchor       *string                         `json:"anchor,omitempty"`
-	DwellSeconds int                             `json:"dwell_seconds"`
-	Id           string                          `json:"id"`
-	Ledger       []AdminDocumentationLedgerEntry `json:"ledger"`
-
-	// PagePath Documentation page the workflow practices
-	PagePath     *string                         `json:"page_path,omitempty"`
-	Publication  *AdminDocumentationPublication  `json:"publication,omitempty"`
-	Revision     int                             `json:"revision"`
-	State        string                          `json:"state"`
-	StateVersion int                             `json:"state_version"`
-	Stuck        AdminDocumentationWorkflowStuck `json:"stuck"`
-
-	// Title Page title resolved server-side from the library manifest
-	Title     *string   `json:"title,omitempty"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-// AdminDocumentationWorkflowList defines model for AdminDocumentationWorkflowList.
-type AdminDocumentationWorkflowList struct {
-	// NextCursor Present when another page exists
-	NextCursor *string                      `json:"next_cursor,omitempty"`
-	Workflows  []AdminDocumentationWorkflow `json:"workflows"`
-}
-
-// AdminDocumentationWorkflowStuck defines model for AdminDocumentationWorkflowStuck.
-type AdminDocumentationWorkflowStuck struct {
-	FailureClass   *string                                `json:"failure_class,omitempty"`
-	FailureCode    *string                                `json:"failure_code,omitempty"`
-	FailureSummary *string                                `json:"failure_summary,omitempty"`
-	Flag           bool                                   `json:"flag"`
-	Reason         *AdminDocumentationWorkflowStuckReason `json:"reason,omitempty"`
-}
-
-// AdminDocumentationWorkflowStuckReason defines model for AdminDocumentationWorkflowStuck.Reason.
-type AdminDocumentationWorkflowStuckReason string
 
 // AdminEnvironment defines model for AdminEnvironment.
 type AdminEnvironment struct {
@@ -1216,25 +812,19 @@ type AdminHumanActionAction string
 
 // AdminRunnableActionItem defines model for AdminRunnableActionItem.
 type AdminRunnableActionItem struct {
-	ActionKey       string `json:"action_key"`
-	Attempt         int    `json:"attempt"`
-	ContentId       string `json:"content_id"`
-	ContentKind     string `json:"content_kind"`
-	ContentRevision string `json:"content_revision"`
-
-	// DocumentWorkflowId Present only for actions bound to a documentation workflow
-	DocumentWorkflowId *string                     `json:"document_workflow_id,omitempty"`
-	FailureClass       string                      `json:"failure_class"`
-	FailureCode        string                      `json:"failure_code"`
-	FailureSummary     string                      `json:"failure_summary"`
-	Flag               AdminRunnableActionItemFlag `json:"flag"`
-	LeaseExpiresAt     *time.Time                  `json:"lease_expires_at,omitempty"`
-	NextRunAt          time.Time                   `json:"next_run_at"`
-	Phase              string                      `json:"phase"`
-
-	// Reconciled When the documentation product acknowledged the result
-	Reconciled *time.Time `json:"reconciled,omitempty"`
-	State      string     `json:"state"`
+	ActionKey       string                      `json:"action_key"`
+	Attempt         int                         `json:"attempt"`
+	ContentId       string                      `json:"content_id"`
+	ContentKind     string                      `json:"content_kind"`
+	ContentRevision string                      `json:"content_revision"`
+	FailureClass    string                      `json:"failure_class"`
+	FailureCode     string                      `json:"failure_code"`
+	FailureSummary  string                      `json:"failure_summary"`
+	Flag            AdminRunnableActionItemFlag `json:"flag"`
+	LeaseExpiresAt  *time.Time                  `json:"lease_expires_at,omitempty"`
+	NextRunAt       time.Time                   `json:"next_run_at"`
+	Phase           string                      `json:"phase"`
+	State           string                      `json:"state"`
 }
 
 // AdminRunnableActionItemFlag defines model for AdminRunnableActionItem.Flag.
@@ -1287,11 +877,6 @@ type AdminUserRole string
 // AdminUserList defines model for AdminUserList.
 type AdminUserList struct {
 	Users []AdminUser `json:"users"`
-}
-
-// AdminWorkflowReasonRequest defines model for AdminWorkflowReasonRequest.
-type AdminWorkflowReasonRequest struct {
-	Reason string `json:"reason"`
 }
 
 // AssistantConversation defines model for AssistantConversation.
@@ -1501,13 +1086,6 @@ type DocumentationAsset struct {
 	Path   string `json:"path"`
 }
 
-// DocumentationBatchCreateRequest defines model for DocumentationBatchCreateRequest.
-type DocumentationBatchCreateRequest struct {
-	// Concurrency In-flight Agent chain threshold; defaults to 2 when omitted
-	Concurrency *int                    `json:"concurrency,omitempty"`
-	Scope       AdminDocumentBatchScope `json:"scope"`
-}
-
 // DocumentationPageResponse defines model for DocumentationPageResponse.
 type DocumentationPageResponse struct {
 	Anchors []DocumentationAnchor `json:"anchors"`
@@ -1523,82 +1101,6 @@ type DocumentationPageResponse struct {
 	PageKind string `json:"page_kind"`
 	Path     string `json:"path"`
 	Title    string `json:"title"`
-}
-
-// DocumentationPracticeDetail defines model for DocumentationPracticeDetail.
-type DocumentationPracticeDetail struct {
-	Boundary     string                       `json:"boundary"`
-	Id           string                       `json:"id"`
-	Objective    string                       `json:"objective"`
-	Observations []string                     `json:"observations"`
-	Runtime      DocumentationPracticeRuntime `json:"runtime"`
-
-	// Steps Instruction text; empty for pure observation practices
-	Steps []string `json:"steps"`
-	Title string   `json:"title"`
-}
-
-// DocumentationPracticeEnvironment defines model for DocumentationPracticeEnvironment.
-type DocumentationPracticeEnvironment struct {
-	// Nodes Terminal node names; empty for the single management terminal
-	Nodes []string `json:"nodes"`
-
-	// Phase Controller phase, for example Pending, Provisioning, Ready, Draining
-	Phase string `json:"phase"`
-
-	// Runtime Runtime kind, for example k8s or node
-	Runtime string `json:"runtime"`
-}
-
-// DocumentationPracticeResetResponse defines model for DocumentationPracticeResetResponse.
-type DocumentationPracticeResetResponse struct {
-	Reset bool `json:"reset"`
-
-	// ResetNonce The bumped reset nonce of the environment
-	ResetNonce int `json:"reset_nonce"`
-}
-
-// DocumentationPracticeRuntime defines model for DocumentationPracticeRuntime.
-type DocumentationPracticeRuntime struct {
-	BaseImage string `json:"base_image"`
-
-	// Name Runtime kind, for example k8s or node
-	Name string `json:"name"`
-}
-
-// DocumentationPracticeStart defines model for DocumentationPracticeStart.
-type DocumentationPracticeStart struct {
-	State      string `json:"state"`
-	WorkflowId string `json:"workflow_id"`
-}
-
-// DocumentationPracticeStartRequest defines model for DocumentationPracticeStartRequest.
-type DocumentationPracticeStartRequest struct {
-	// Anchor Heading anchor on the page; empty for page-level ignition
-	Anchor *string `json:"anchor,omitempty"`
-
-	// PagePath Page of the pinned library to practice
-	PagePath string `json:"page_path"`
-}
-
-// DocumentationPracticeStopResponse defines model for DocumentationPracticeStopResponse.
-type DocumentationPracticeStopResponse struct {
-	Stopped bool `json:"stopped"`
-}
-
-// DocumentationPracticeSummary defines model for DocumentationPracticeSummary.
-type DocumentationPracticeSummary struct {
-	// Anchor Heading anchor on the page this practice hangs from
-	Anchor     string `json:"anchor"`
-	PracticeId string `json:"practice_id"`
-	Title      string `json:"title"`
-}
-
-// DocumentationPracticesResponse defines model for DocumentationPracticesResponse.
-type DocumentationPracticesResponse struct {
-	// Digest sha256 digest of the returned practice set; returned as the ETag
-	Digest    string                         `json:"digest"`
-	Practices []DocumentationPracticeSummary `json:"practices"`
 }
 
 // DocumentationScenarioCloseResponse defines model for DocumentationScenarioCloseResponse.
@@ -2068,9 +1570,6 @@ type VerifiedScenario struct {
 // AuthoringSessionID defines model for AuthoringSessionID.
 type AuthoringSessionID = string
 
-// DocumentWorkflowID defines model for DocumentWorkflowID.
-type DocumentWorkflowID = string
-
 // GeneratorTurnID defines model for GeneratorTurnID.
 type GeneratorTurnID = string
 
@@ -2096,53 +1595,6 @@ type ListAdminAuditParams struct {
 	UserId *string `form:"user_id,omitempty" json:"user_id,omitempty"`
 }
 
-// ListAdminDocumentationBatchesParams defines parameters for ListAdminDocumentationBatches.
-type ListAdminDocumentationBatchesParams struct {
-	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
-}
-
-// ListAdminDocumentationBatchItemsParams defines parameters for ListAdminDocumentationBatchItems.
-type ListAdminDocumentationBatchItemsParams struct {
-	// Cursor Opaque cursor from a previous page
-	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
-	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
-
-	// State Filter by exact item state
-	State *ListAdminDocumentationBatchItemsParamsState `form:"state,omitempty" json:"state,omitempty"`
-}
-
-// ListAdminDocumentationBatchItemsParamsState defines parameters for ListAdminDocumentationBatchItems.
-type ListAdminDocumentationBatchItemsParamsState string
-
-// ListAdminDocumentationCorpusParams defines parameters for ListAdminDocumentationCorpus.
-type ListAdminDocumentationCorpusParams struct {
-	// Section Tree node path; only pages under it are returned
-	Section *string `form:"section,omitempty" json:"section,omitempty"`
-
-	// Search Case-insensitive substring match on the page title, resolved from the library manifests
-	Search *string `form:"search,omitempty" json:"search,omitempty"`
-
-	// Failures Only pages with failed or dwell-stuck workflows
-	Failures *bool `form:"failures,omitempty" json:"failures,omitempty"`
-
-	// Cursor Opaque cursor from a previous page
-	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
-	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
-}
-
-// ListAdminDocumentationWorkflowsParams defines parameters for ListAdminDocumentationWorkflows.
-type ListAdminDocumentationWorkflowsParams struct {
-	// Cursor Opaque cursor from a previous page
-	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
-	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
-
-	// State Filter by exact workflow state
-	State *string `form:"state,omitempty" json:"state,omitempty"`
-
-	// PagePath Filter by exact documentation page path
-	PagePath *string `form:"page_path,omitempty" json:"page_path,omitempty"`
-}
-
 // ListAdminRunnableActionsParams defines parameters for ListAdminRunnableActions.
 type ListAdminRunnableActionsParams struct {
 	// State Filter items by queue state; the summary always covers the whole queue
@@ -2166,12 +1618,6 @@ type GetDocumentationAssetParams struct {
 
 // GetDocumentationPageParams defines parameters for GetDocumentationPage.
 type GetDocumentationPageParams struct {
-	// Path Library page path, for example docs/concepts/workloads/pods/pod-lifecycle
-	Path string `form:"path" json:"path"`
-}
-
-// ListDocumentationPracticesParams defines parameters for ListDocumentationPractices.
-type ListDocumentationPracticesParams struct {
 	// Path Library page path, for example docs/concepts/workloads/pods/pod-lifecycle
 	Path string `form:"path" json:"path"`
 }
@@ -2227,27 +1673,6 @@ type CloseTerminalWindowParams struct {
 	Node *string `form:"node,omitempty" json:"node,omitempty"`
 }
 
-// CreateAdminDocumentationBatchJSONRequestBody defines body for CreateAdminDocumentationBatch for application/json ContentType.
-type CreateAdminDocumentationBatchJSONRequestBody = DocumentationBatchCreateRequest
-
-// CancelAdminDocumentationBatchJSONRequestBody defines body for CancelAdminDocumentationBatch for application/json ContentType.
-type CancelAdminDocumentationBatchJSONRequestBody = AdminWorkflowReasonRequest
-
-// PauseAdminDocumentationBatchJSONRequestBody defines body for PauseAdminDocumentationBatch for application/json ContentType.
-type PauseAdminDocumentationBatchJSONRequestBody = AdminWorkflowReasonRequest
-
-// ResumeAdminDocumentationBatchJSONRequestBody defines body for ResumeAdminDocumentationBatch for application/json ContentType.
-type ResumeAdminDocumentationBatchJSONRequestBody = AdminWorkflowReasonRequest
-
-// RetryFailedAdminDocumentationBatchItemsJSONRequestBody defines body for RetryFailedAdminDocumentationBatchItems for application/json ContentType.
-type RetryFailedAdminDocumentationBatchItemsJSONRequestBody = AdminWorkflowReasonRequest
-
-// ForceFailAdminDocumentationWorkflowJSONRequestBody defines body for ForceFailAdminDocumentationWorkflow for application/json ContentType.
-type ForceFailAdminDocumentationWorkflowJSONRequestBody = AdminWorkflowReasonRequest
-
-// RestartAdminDocumentationWorkflowJSONRequestBody defines body for RestartAdminDocumentationWorkflow for application/json ContentType.
-type RestartAdminDocumentationWorkflowJSONRequestBody = AdminWorkflowReasonRequest
-
 // ResetAdminUserTOTPJSONRequestBody defines body for ResetAdminUserTOTP for application/json ContentType.
 type ResetAdminUserTOTPJSONRequestBody = AdminTOTPResetRequest
 
@@ -2259,12 +1684,6 @@ type RegisterJSONRequestBody = RegisterRequest
 
 // SendAuthoringMessageJSONRequestBody defines body for SendAuthoringMessage for application/json ContentType.
 type SendAuthoringMessageJSONRequestBody = AuthoringMessageRequest
-
-// StartDocumentationPracticeJSONRequestBody defines body for StartDocumentationPractice for application/json ContentType.
-type StartDocumentationPracticeJSONRequestBody = DocumentationPracticeStartRequest
-
-// CreatePracticeTerminalTicketJSONRequestBody defines body for CreatePracticeTerminalTicket for application/json ContentType.
-type CreatePracticeTerminalTicketJSONRequestBody = TerminalTicketRequest
 
 // CreateBlankScenarioTerminalTicketJSONRequestBody defines body for CreateBlankScenarioTerminalTicket for application/json ContentType.
 type CreateBlankScenarioTerminalTicketJSONRequestBody = TerminalTicketRequest
@@ -2310,45 +1729,6 @@ type ServerInterface interface {
 	// Page the append-only human action audit ledger (admin only)
 	// (GET /admin/audit)
 	ListAdminAudit(c *gin.Context, params ListAdminAuditParams)
-	// List the newest documentation batches with progress counts (admin only)
-	// (GET /admin/documentation/batches)
-	ListAdminDocumentationBatches(c *gin.Context, params ListAdminDocumentationBatchesParams)
-	// Declare a documentation batch over one corpus scope (admin only)
-	// (POST /admin/documentation/batches)
-	CreateAdminDocumentationBatch(c *gin.Context)
-	// Inspect one documentation batch with progress counts (admin only)
-	// (GET /admin/documentation/batches/{batch_id})
-	GetAdminDocumentationBatch(c *gin.Context, batchId string)
-	// Cancel a batch; not-yet-started items are cancelled and in-flight items run to their terminal states (admin only)
-	// (POST /admin/documentation/batches/{batch_id}/cancel)
-	CancelAdminDocumentationBatch(c *gin.Context, batchId string)
-	// Page through one batch's items in corpus order (admin only)
-	// (GET /admin/documentation/batches/{batch_id}/items)
-	ListAdminDocumentationBatchItems(c *gin.Context, batchId string, params ListAdminDocumentationBatchItemsParams)
-	// Stop new ignitions for a Running batch with a required reason (admin only)
-	// (POST /admin/documentation/batches/{batch_id}/pause)
-	PauseAdminDocumentationBatch(c *gin.Context, batchId string)
-	// Resume scheduling for a Paused batch with a required reason (admin only)
-	// (POST /admin/documentation/batches/{batch_id}/resume)
-	ResumeAdminDocumentationBatch(c *gin.Context, batchId string)
-	// Restart a live batch's failed workflows and re-enqueue their items with a required reason (admin only)
-	// (POST /admin/documentation/batches/{batch_id}/retry-failed)
-	RetryFailedAdminDocumentationBatchItems(c *gin.Context, batchId string)
-	// Project the corpus pages with workflow state rollups (admin only)
-	// (GET /admin/documentation/corpus)
-	ListAdminDocumentationCorpus(c *gin.Context, params ListAdminDocumentationCorpusParams)
-	// List documentation workflows with page identity and stuck status (admin only)
-	// (GET /admin/documentation/workflows)
-	ListAdminDocumentationWorkflows(c *gin.Context, params ListAdminDocumentationWorkflowsParams)
-	// Inspect one documentation workflow with its ledger, Agent audits, and publication (admin only)
-	// (GET /admin/documentation/workflows/{workflow_id})
-	GetAdminDocumentationWorkflow(c *gin.Context, workflowId DocumentWorkflowID)
-	// Drive a stuck documentation workflow to Failed with a required reason (admin only)
-	// (POST /admin/documentation/workflows/{workflow_id}/force-fail)
-	ForceFailAdminDocumentationWorkflow(c *gin.Context, workflowId DocumentWorkflowID)
-	// Reset a failed or rejected documentation workflow to Planning with a required reason (admin only)
-	// (POST /admin/documentation/workflows/{workflow_id}/restart)
-	RestartAdminDocumentationWorkflow(c *gin.Context, workflowId DocumentWorkflowID)
 	// List every RuntimeEnvironment across users with lifecycle state (admin only)
 	// (GET /admin/environments)
 	ListAdminEnvironments(c *gin.Context)
@@ -2397,30 +1777,6 @@ type ServerInterface interface {
 	// One parsed library page verified against its offline digest (public read)
 	// (GET /documentation/page)
 	GetDocumentationPage(c *gin.Context, params GetDocumentationPageParams)
-	// Start the documentation practice workflow for one library page (admin only)
-	// (POST /documentation/practice)
-	StartDocumentationPractice(c *gin.Context)
-	// Practices anchored on one library page (public read)
-	// (GET /documentation/practices)
-	ListDocumentationPractices(c *gin.Context, params ListDocumentationPracticesParams)
-	// One practice's reader projection with its runtime summary (public read)
-	// (GET /documentation/practices/{id})
-	GetDocumentationPractice(c *gin.Context, id string)
-	// Live environment phase and terminal node info (JWT)
-	// (GET /documentation/practices/{id}/environment)
-	GetDocumentationPracticeEnvironment(c *gin.Context, id string)
-	// Reset the practice environment by bumping its reset nonce (JWT)
-	// (POST /documentation/practices/{id}/reset)
-	ResetDocumentationPracticeEnvironment(c *gin.Context, id string)
-	// Start or resume the practice environment (JWT)
-	// (POST /documentation/practices/{id}/start)
-	StartDocumentationPracticeEnvironment(c *gin.Context, id string)
-	// Destroy the practice environment (JWT)
-	// (POST /documentation/practices/{id}/stop)
-	StopDocumentationPracticeEnvironment(c *gin.Context, id string)
-	// Create a one-time ticket for the practice terminal WebSocket (JWT)
-	// (POST /documentation/practices/{id}/terminal-ticket)
-	CreatePracticeTerminalTicket(c *gin.Context, id string)
 	// Close the blank practice scenario and release its resources (JWT)
 	// (DELETE /documentation/scenario)
 	CloseDocumentationScenario(c *gin.Context)
@@ -2582,434 +1938,6 @@ func (siw *ServerInterfaceWrapper) ListAdminAudit(c *gin.Context) {
 	}
 
 	siw.Handler.ListAdminAudit(c, params)
-}
-
-// ListAdminDocumentationBatches operation middleware
-func (siw *ServerInterfaceWrapper) ListAdminDocumentationBatches(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ListAdminDocumentationBatchesParams
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.ListAdminDocumentationBatches(c, params)
-}
-
-// CreateAdminDocumentationBatch operation middleware
-func (siw *ServerInterfaceWrapper) CreateAdminDocumentationBatch(c *gin.Context) {
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.CreateAdminDocumentationBatch(c)
-}
-
-// GetAdminDocumentationBatch operation middleware
-func (siw *ServerInterfaceWrapper) GetAdminDocumentationBatch(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "batch_id" -------------
-	var batchId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "batch_id", c.Param("batch_id"), &batchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter batch_id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetAdminDocumentationBatch(c, batchId)
-}
-
-// CancelAdminDocumentationBatch operation middleware
-func (siw *ServerInterfaceWrapper) CancelAdminDocumentationBatch(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "batch_id" -------------
-	var batchId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "batch_id", c.Param("batch_id"), &batchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter batch_id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.CancelAdminDocumentationBatch(c, batchId)
-}
-
-// ListAdminDocumentationBatchItems operation middleware
-func (siw *ServerInterfaceWrapper) ListAdminDocumentationBatchItems(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "batch_id" -------------
-	var batchId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "batch_id", c.Param("batch_id"), &batchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter batch_id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ListAdminDocumentationBatchItemsParams
-
-	// ------------- Optional query parameter "cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", c.Request.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter cursor: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "state" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", c.Request.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter state: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.ListAdminDocumentationBatchItems(c, batchId, params)
-}
-
-// PauseAdminDocumentationBatch operation middleware
-func (siw *ServerInterfaceWrapper) PauseAdminDocumentationBatch(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "batch_id" -------------
-	var batchId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "batch_id", c.Param("batch_id"), &batchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter batch_id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.PauseAdminDocumentationBatch(c, batchId)
-}
-
-// ResumeAdminDocumentationBatch operation middleware
-func (siw *ServerInterfaceWrapper) ResumeAdminDocumentationBatch(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "batch_id" -------------
-	var batchId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "batch_id", c.Param("batch_id"), &batchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter batch_id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.ResumeAdminDocumentationBatch(c, batchId)
-}
-
-// RetryFailedAdminDocumentationBatchItems operation middleware
-func (siw *ServerInterfaceWrapper) RetryFailedAdminDocumentationBatchItems(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "batch_id" -------------
-	var batchId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "batch_id", c.Param("batch_id"), &batchId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter batch_id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.RetryFailedAdminDocumentationBatchItems(c, batchId)
-}
-
-// ListAdminDocumentationCorpus operation middleware
-func (siw *ServerInterfaceWrapper) ListAdminDocumentationCorpus(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ListAdminDocumentationCorpusParams
-
-	// ------------- Optional query parameter "section" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "section", c.Request.URL.Query(), &params.Section, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter section: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "search" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", c.Request.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter search: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "failures" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "failures", c.Request.URL.Query(), &params.Failures, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter failures: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", c.Request.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter cursor: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.ListAdminDocumentationCorpus(c, params)
-}
-
-// ListAdminDocumentationWorkflows operation middleware
-func (siw *ServerInterfaceWrapper) ListAdminDocumentationWorkflows(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ListAdminDocumentationWorkflowsParams
-
-	// ------------- Optional query parameter "cursor" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", c.Request.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter cursor: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "state" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", c.Request.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter state: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	// ------------- Optional query parameter "page_path" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "page_path", c.Request.URL.Query(), &params.PagePath, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter page_path: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.ListAdminDocumentationWorkflows(c, params)
-}
-
-// GetAdminDocumentationWorkflow operation middleware
-func (siw *ServerInterfaceWrapper) GetAdminDocumentationWorkflow(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "workflow_id" -------------
-	var workflowId DocumentWorkflowID
-
-	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetAdminDocumentationWorkflow(c, workflowId)
-}
-
-// ForceFailAdminDocumentationWorkflow operation middleware
-func (siw *ServerInterfaceWrapper) ForceFailAdminDocumentationWorkflow(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "workflow_id" -------------
-	var workflowId DocumentWorkflowID
-
-	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.ForceFailAdminDocumentationWorkflow(c, workflowId)
-}
-
-// RestartAdminDocumentationWorkflow operation middleware
-func (siw *ServerInterfaceWrapper) RestartAdminDocumentationWorkflow(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "workflow_id" -------------
-	var workflowId DocumentWorkflowID
-
-	err = runtime.BindStyledParameterWithOptions("simple", "workflow_id", c.Param("workflow_id"), &workflowId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter workflow_id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.RestartAdminDocumentationWorkflow(c, workflowId)
 }
 
 // ListAdminEnvironments operation middleware
@@ -3364,208 +2292,6 @@ func (siw *ServerInterfaceWrapper) GetDocumentationPage(c *gin.Context) {
 	}
 
 	siw.Handler.GetDocumentationPage(c, params)
-}
-
-// StartDocumentationPractice operation middleware
-func (siw *ServerInterfaceWrapper) StartDocumentationPractice(c *gin.Context) {
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.StartDocumentationPractice(c)
-}
-
-// ListDocumentationPractices operation middleware
-func (siw *ServerInterfaceWrapper) ListDocumentationPractices(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ListDocumentationPracticesParams
-
-	// ------------- Required query parameter "path" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", c.Request.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter path: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.ListDocumentationPractices(c, params)
-}
-
-// GetDocumentationPractice operation middleware
-func (siw *ServerInterfaceWrapper) GetDocumentationPractice(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetDocumentationPractice(c, id)
-}
-
-// GetDocumentationPracticeEnvironment operation middleware
-func (siw *ServerInterfaceWrapper) GetDocumentationPracticeEnvironment(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.GetDocumentationPracticeEnvironment(c, id)
-}
-
-// ResetDocumentationPracticeEnvironment operation middleware
-func (siw *ServerInterfaceWrapper) ResetDocumentationPracticeEnvironment(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.ResetDocumentationPracticeEnvironment(c, id)
-}
-
-// StartDocumentationPracticeEnvironment operation middleware
-func (siw *ServerInterfaceWrapper) StartDocumentationPracticeEnvironment(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.StartDocumentationPracticeEnvironment(c, id)
-}
-
-// StopDocumentationPracticeEnvironment operation middleware
-func (siw *ServerInterfaceWrapper) StopDocumentationPracticeEnvironment(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.StopDocumentationPracticeEnvironment(c, id)
-}
-
-// CreatePracticeTerminalTicket operation middleware
-func (siw *ServerInterfaceWrapper) CreatePracticeTerminalTicket(c *gin.Context) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", c.Param("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter id: %w", err), http.StatusBadRequest)
-		return
-	}
-
-	c.Set(string(BearerAuthScopes), []string{})
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		middleware(c)
-		if c.IsAborted() {
-			return
-		}
-	}
-
-	siw.Handler.CreatePracticeTerminalTicket(c, id)
 }
 
 // CloseDocumentationScenario operation middleware
@@ -4468,19 +3194,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	}
 
 	router.GET(options.BaseURL+"/admin/audit", wrapper.ListAdminAudit)
-	router.GET(options.BaseURL+"/admin/documentation/batches", wrapper.ListAdminDocumentationBatches)
-	router.POST(options.BaseURL+"/admin/documentation/batches", wrapper.CreateAdminDocumentationBatch)
-	router.GET(options.BaseURL+"/admin/documentation/batches/:batch_id", wrapper.GetAdminDocumentationBatch)
-	router.POST(options.BaseURL+"/admin/documentation/batches/:batch_id/cancel", wrapper.CancelAdminDocumentationBatch)
-	router.GET(options.BaseURL+"/admin/documentation/batches/:batch_id/items", wrapper.ListAdminDocumentationBatchItems)
-	router.POST(options.BaseURL+"/admin/documentation/batches/:batch_id/pause", wrapper.PauseAdminDocumentationBatch)
-	router.POST(options.BaseURL+"/admin/documentation/batches/:batch_id/resume", wrapper.ResumeAdminDocumentationBatch)
-	router.POST(options.BaseURL+"/admin/documentation/batches/:batch_id/retry-failed", wrapper.RetryFailedAdminDocumentationBatchItems)
-	router.GET(options.BaseURL+"/admin/documentation/corpus", wrapper.ListAdminDocumentationCorpus)
-	router.GET(options.BaseURL+"/admin/documentation/workflows", wrapper.ListAdminDocumentationWorkflows)
-	router.GET(options.BaseURL+"/admin/documentation/workflows/:workflow_id", wrapper.GetAdminDocumentationWorkflow)
-	router.POST(options.BaseURL+"/admin/documentation/workflows/:workflow_id/force-fail", wrapper.ForceFailAdminDocumentationWorkflow)
-	router.POST(options.BaseURL+"/admin/documentation/workflows/:workflow_id/restart", wrapper.RestartAdminDocumentationWorkflow)
 	router.GET(options.BaseURL+"/admin/environments", wrapper.ListAdminEnvironments)
 	router.POST(options.BaseURL+"/admin/environments/:name/release", wrapper.ReleaseAdminEnvironment)
 	router.GET(options.BaseURL+"/admin/runnable-actions", wrapper.ListAdminRunnableActions)
@@ -4497,14 +3210,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/authoring/sessions/:id/messages", wrapper.SendAuthoringMessage)
 	router.GET(options.BaseURL+"/documentation/asset", wrapper.GetDocumentationAsset)
 	router.GET(options.BaseURL+"/documentation/page", wrapper.GetDocumentationPage)
-	router.POST(options.BaseURL+"/documentation/practice", wrapper.StartDocumentationPractice)
-	router.GET(options.BaseURL+"/documentation/practices", wrapper.ListDocumentationPractices)
-	router.GET(options.BaseURL+"/documentation/practices/:id", wrapper.GetDocumentationPractice)
-	router.GET(options.BaseURL+"/documentation/practices/:id/environment", wrapper.GetDocumentationPracticeEnvironment)
-	router.POST(options.BaseURL+"/documentation/practices/:id/reset", wrapper.ResetDocumentationPracticeEnvironment)
-	router.POST(options.BaseURL+"/documentation/practices/:id/start", wrapper.StartDocumentationPracticeEnvironment)
-	router.POST(options.BaseURL+"/documentation/practices/:id/stop", wrapper.StopDocumentationPracticeEnvironment)
-	router.POST(options.BaseURL+"/documentation/practices/:id/terminal-ticket", wrapper.CreatePracticeTerminalTicket)
 	router.DELETE(options.BaseURL+"/documentation/scenario", wrapper.CloseDocumentationScenario)
 	router.GET(options.BaseURL+"/documentation/scenario", wrapper.GetDocumentationScenario)
 	router.POST(options.BaseURL+"/documentation/scenario", wrapper.CreateDocumentationScenario)
@@ -4545,202 +3250,150 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"/p8AAAD//w==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

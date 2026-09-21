@@ -8,8 +8,8 @@ type TerminalState = "idle" | "connecting" | "connected" | "disconnected";
 
 // A terminal channel abstracts the content-specific parts of one terminal:
 // how a one-time ticket is minted and where the ticket-authenticated socket
-// lives. Operations scenarios and documentation practices share the socket
-// protocol and differ only in their channel.
+// lives. Operations scenarios and the blank documentation scenario share the
+// socket protocol and differ only in their channel.
 export interface TerminalChannel {
   ticket: (window: string, node: string | undefined) => Promise<string>;
   socket: (window: string, ticket: string, node: string | undefined) => string;
@@ -30,17 +30,6 @@ export function scenarioTerminalChannel(scenarioId: string): TerminalChannel {
         .then((response) => response.ticket),
     socket: (window, ticket, node) =>
       terminalSocketURL(`/api/operations/scenarios/${scenarioId}/terminal`, window, ticket, node),
-  };
-}
-
-export function practiceTerminalChannel(practiceId: string): TerminalChannel {
-  return {
-    ticket: (window, node) =>
-      api
-        .createPracticeTerminalTicket(practiceId, window, node)
-        .then((response) => response.ticket),
-    socket: (window, ticket, node) =>
-      terminalSocketURL(`/api/documentation/practices/${practiceId}/terminal`, window, ticket, node),
   };
 }
 

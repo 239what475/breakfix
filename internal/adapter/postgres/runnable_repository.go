@@ -957,35 +957,29 @@ func runnableArchiveDigest(archive []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// RunnableActionObservation is the admin queue read model: the public action
-// joined with its documentation binding, when one exists.
+// RunnableActionObservation is the admin queue read model.
 type RunnableActionObservation struct {
-	ActionKey          string
-	ContentKind        string
-	ContentID          string
-	ContentRevision    string
-	Phase              runnable.ActionPhase
-	State              string
-	Attempt            int
-	LeaseExpiresAt     *time.Time
-	NextRunAt          time.Time
-	FailureClass       string
-	FailureCode        string
-	FailureSummary     string
-	CreatedAt          time.Time
-	DocumentWorkflowID *string
-	ReconciledAt       *time.Time
+	ActionKey       string
+	ContentKind     string
+	ContentID       string
+	ContentRevision string
+	Phase           runnable.ActionPhase
+	State           string
+	Attempt         int
+	LeaseExpiresAt  *time.Time
+	NextRunAt       time.Time
+	FailureClass    string
+	FailureCode     string
+	FailureSummary  string
+	CreatedAt       time.Time
 }
 
 // ListRunnableActionObservations lists the queue, optionally filtered by
-// state and phase, newest first. The document binding columns stay nil for
-// public runnable content that has no documentation workflow.
+// state and phase, newest first.
 func (d *RunnableRepository) ListRunnableActionObservations(ctx context.Context, state, phase string) ([]RunnableActionObservation, error) {
-	query := `SELECT a.action_key, a.content_kind, a.content_id, a.content_revision, a.phase, a.state, a.attempt,
-		a.lease_expires_at, a.next_run_at, a.failure_class, a.failure_code, a.failure_summary, a.created_at,
-		b.workflow_id, b.reconciled_at
-		FROM runnable_actions a
-		LEFT JOIN document_runnable_actions b ON b.action_key = a.action_key`
+	query := `SELECT action_key, content_kind, content_id, content_revision, phase, state, attempt,
+		lease_expires_at, next_run_at, failure_class, failure_code, failure_summary, created_at
+		FROM runnable_actions`
 	conditions := make([]string, 0, 2)
 	args := make([]any, 0, 2)
 	if state != "" {
@@ -1008,19 +1002,9 @@ func (d *RunnableRepository) ListRunnableActionObservations(ctx context.Context,
 	result := []RunnableActionObservation{}
 	for rows.Next() {
 		var observation RunnableActionObservation
-		var workflowID sql.NullString
-		var reconciledTime sql.NullTime
 		if err := rows.Scan(&observation.ActionKey, &observation.ContentKind, &observation.ContentID, &observation.ContentRevision, &observation.Phase, &observation.State, &observation.Attempt,
-			&observation.LeaseExpiresAt, &observation.NextRunAt, &observation.FailureClass, &observation.FailureCode, &observation.FailureSummary, &observation.CreatedAt,
-			&workflowID, &reconciledTime); err != nil {
+			&observation.LeaseExpiresAt, &observation.NextRunAt, &observation.FailureClass, &observation.FailureCode, &observation.FailureSummary, &observation.CreatedAt); err != nil {
 			return nil, err
-		}
-		if workflowID.Valid {
-			observation.DocumentWorkflowID = &workflowID.String
-			if reconciledTime.Valid {
-				reconciled := reconciledTime.Time
-				observation.ReconciledAt = &reconciled
-			}
 		}
 		result = append(result, observation)
 	}

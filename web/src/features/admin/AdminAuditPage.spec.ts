@@ -16,8 +16,8 @@ const ledger: AdminAuditPageModel = {
 		{
 			id: "audit-force-fail",
 			user_id: "u-admin",
-			action: "documentation.workflow.force_fail",
-			target_type: "document_workflow",
+			action: "environment.release",
+			target_type: "runtime_environment",
 			target_id: "document-workflow-stuck",
 			detail: { from_state: "MaterializingArtifact", to_state: "Failed", reason: "materialization stalled" },
 			created_at: "2026-09-19T08:05:00Z",
@@ -25,8 +25,8 @@ const ledger: AdminAuditPageModel = {
 		{
 			id: "audit-start",
 			user_id: "u-admin",
-			action: "documentation.practice.start",
-			target_type: "document_workflow",
+			action: "user.totp.reset",
+			target_type: "runtime_environment",
 			target_id: "document-workflow-stuck",
 			detail: {},
 			created_at: "2026-09-19T08:00:00Z",
@@ -50,7 +50,7 @@ describe("AdminAuditPage", () => {
 
 		const rows = page.findAll(".admin-audit-item");
 		expect(rows).toHaveLength(2);
-		expect(rows[0].get(".admin-audit-action").text()).toBe("documentation.workflow.force_fail");
+		expect(rows[0].get(".admin-audit-action").text()).toBe("environment.release");
 		expect(rows[0].get(".admin-audit-target").text()).toBe("u-admin → document-workflow-stuck");
 	});
 

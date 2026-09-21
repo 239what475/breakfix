@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	documentdomain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	"github.com/breakfix/breakfix/internal/domain/runnable"
 )
 
@@ -274,22 +273,11 @@ func TestRunnableQueueObservationCountsFlagsAndFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A documentation workflow with a failed, unreconciled verification action.
-	docWorkflow, err := documentdomain.NewWorkflow("document-workflow-queue", now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.DocumentPractice.CreateWorkflow(ctx, docWorkflow, testWorkflowIdentity(), nil); err != nil {
-		t.Fatal(err)
-	}
 	failed := runnable.ActionIdentity{
 		Content:      revision.Spec.Identity,
 		SpecDigest:   queued.SpecDigest,
 		Phase:        runnable.ActionVerify,
 		StateVersion: 7,
-	}
-	if err := database.DocumentPractice.BindRunnableAction(ctx, docWorkflow.ID, failed, now); err != nil {
-		t.Fatal(err)
 	}
 	if _, err := database.conn.ExecContext(ctx, `INSERT INTO runnable_actions (action_key, content_kind, content_id, content_revision, spec_digest, phase, state_version, runnable_revision_digest, state, attempt, next_run_at, failure_class, failure_code, failure_summary, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'failed', 2, ?, 'infrastructure', 'env-lost', 'environment vanished', ?, ?)`,
@@ -319,20 +307,14 @@ func TestRunnableQueueObservationCountsFlagsAndFilters(t *testing.T) {
 	if len(observations) != 4 {
 		t.Fatalf("observations = %d, want 4", len(observations))
 	}
-	flags := map[string]string{}
+	attemptHigh := 0
 	for _, observation := range observations {
-		switch observation.ActionKey {
-		case running.Key():
-			flags["attempt-high"] = "attempt-high"
-		case failed.Key():
-			if observation.DocumentWorkflowID == nil || *observation.DocumentWorkflowID != docWorkflow.ID || observation.ReconciledAt != nil {
-				t.Fatalf("failed binding observation = %#v", observation)
-			}
-			flags["failed-unreconciled"] = "failed-unreconciled"
+		if observation.Attempt >= 4 {
+			attemptHigh++
 		}
 	}
-	if len(flags) != 2 {
-		t.Fatalf("expected both flag conditions in the queue, got %v", flags)
+	if attemptHigh != 2 {
+		t.Fatalf("attempt-high observations = %d, want 2", attemptHigh)
 	}
 	filtered, err := database.Runnable.ListRunnableActionObservations(ctx, "failed", "verify")
 	if err != nil || len(filtered) != 1 || filtered[0].ActionKey != failed.Key() {

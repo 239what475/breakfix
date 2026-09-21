@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	docsource "github.com/breakfix/breakfix/internal/adapter/documentation"
-	documentdomain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
 )
@@ -25,7 +24,7 @@ type documentationLibrary interface {
 	ReadDocumentAsset(string) ([]byte, string, error)
 	// PinnedContext is the verified source/commit/language identity reader
 	// queries must be scoped to.
-	PinnedContext() documentdomain.DocumentContext
+	PinnedContext() docsource.DocumentContext
 }
 
 // GetDocumentationPage serves one parsed page. Parsed pages are public read

@@ -13,11 +13,6 @@ import type {
 } from "./types";
 import type {
 	DocumentationPageResponse,
-	DocumentationPracticeDetail,
-	DocumentationPracticeEnvironment,
-	DocumentationPracticesResponse,
-	DocumentationPracticeResetResponse,
-	DocumentationPracticeStopResponse,
 	DocumentationScenarioCloseResponse,
 	DocumentationScenarioEnvironment,
 	DocumentationTreeResponse,
@@ -32,27 +27,10 @@ import type {
 	StopResponse,
 	TerminalTicketResponse,
 	AdminAuditPage,
-	AdminDocumentationWorkflow,
-	AdminDocumentationWorkflowDetail,
-	AdminDocumentationWorkflowList,
-	AdminDocumentationCorpusPage,
-	AdminDocumentBatch,
-	AdminDocumentBatchList,
-	AdminDocumentBatchItemsPage,
-	AdminRunnableActionPage,
 	AdminUserList,
 } from "./generated";
 
 export type MySpaceLearningQuery = NonNullable<GetMySpaceLearningData["query"]>;
-
-// AdminDocumentBatchScopeInput is the declarative batch scope the console
-// sends when initiating a rollout over the corpus.
-export type AdminDocumentBatchScopeInput = {
-  kind: "full" | "sections" | "pages";
-  sections?: string[];
-  pages?: string[];
-  overrides?: { page_path: string; anchor: string }[];
-};
 
 const base = "/api";
 
@@ -272,42 +250,6 @@ export const api = {
 			"GET",
 			path ? `/documentation/tree?path=${encodeURIComponent(path)}` : "/documentation/tree",
 		),
-	getDocumentationPractices: (path: string) =>
-		request<DocumentationPracticesResponse>(
-			"GET",
-			`/documentation/practices?path=${encodeURIComponent(path)}`,
-		),
-	getDocumentationPractice: (id: string) =>
-		request<DocumentationPracticeDetail>(
-			"GET",
-			`/documentation/practices/${encodeURIComponent(id)}`,
-		),
-	startDocumentationPracticeEnvironment: (id: string) =>
-		request<DocumentationPracticeEnvironment>(
-			"POST",
-			`/documentation/practices/${encodeURIComponent(id)}/start`,
-		),
-	getDocumentationPracticeEnvironment: (id: string) =>
-		request<DocumentationPracticeEnvironment>(
-			"GET",
-			`/documentation/practices/${encodeURIComponent(id)}/environment`,
-		),
-	stopDocumentationPracticeEnvironment: (id: string) =>
-		request<DocumentationPracticeStopResponse>(
-			"POST",
-			`/documentation/practices/${encodeURIComponent(id)}/stop`,
-		),
-	resetDocumentationPracticeEnvironment: (id: string) =>
-		request<DocumentationPracticeResetResponse>(
-			"POST",
-			`/documentation/practices/${encodeURIComponent(id)}/reset`,
-		),
-	createPracticeTerminalTicket: (id: string, window: string, node?: string) =>
-		request<TerminalTicketResponse>(
-			"POST",
-			`/documentation/practices/${encodeURIComponent(id)}/terminal-ticket`,
-			{ window, node },
-		),
 	// One blank practice scenario per reader, scoped to the pinned library and
 	// carried across every documentation page.
 	getDocumentationScenario: () =>
@@ -370,50 +312,6 @@ export const api = {
 	listAdminUsers: () => request<AdminUserList>("GET", "/admin/users"),
 	resetAdminUserTOTP: (id: string, password: string) =>
 		request<RegisterResponse>("POST", `/admin/users/${id}/totp-reset`, { password }),
-	listAdminWorkflows: ({ cursor, limit = 50, state, page_path }: { cursor?: string; limit?: number; state?: string; page_path?: string } = {}) => {
-		const query = new URLSearchParams({ limit: String(limit) });
-		if (cursor) query.set("cursor", cursor);
-		if (state) query.set("state", state);
-		if (page_path) query.set("page_path", page_path);
-		return request<AdminDocumentationWorkflowList>("GET", `/admin/documentation/workflows?${query.toString()}`);
-	},
-	listAdminCorpus: ({ section, search, failures, cursor, limit = 50 }: { section?: string; search?: string; failures?: boolean; cursor?: string; limit?: number } = {}) => {
-		const query = new URLSearchParams({ limit: String(limit) });
-		if (section) query.set("section", section);
-		if (search) query.set("search", search);
-		if (failures) query.set("failures", "true");
-		if (cursor) query.set("cursor", cursor);
-		return request<AdminDocumentationCorpusPage>("GET", `/admin/documentation/corpus?${query.toString()}`);
-	},
-	listAdminBatches: (limit = 20) =>
-		request<AdminDocumentBatchList>("GET", `/admin/documentation/batches?limit=${limit}`),
-	getAdminBatch: (id: string) =>
-		request<AdminDocumentBatch>("GET", `/admin/documentation/batches/${encodeURIComponent(id)}`),
-	listAdminBatchItems: (id: string, { state, cursor, limit = 50 }: { state?: string; cursor?: string; limit?: number } = {}) => {
-		const query = new URLSearchParams({ limit: String(limit) });
-		if (state) query.set("state", state);
-		if (cursor) query.set("cursor", cursor);
-		return request<AdminDocumentBatchItemsPage>("GET", `/admin/documentation/batches/${encodeURIComponent(id)}/items?${query.toString()}`);
-	},
-	createAdminBatch: (scope: AdminDocumentBatchScopeInput, concurrency?: number) =>
-		request<AdminDocumentBatch>("POST", "/admin/documentation/batches", {
-			scope,
-			...(concurrency ? { concurrency } : {}),
-		}),
-	pauseAdminBatch: (id: string, reason: string) =>
-		request<AdminDocumentBatch>("POST", `/admin/documentation/batches/${encodeURIComponent(id)}/pause`, { reason }),
-	resumeAdminBatch: (id: string, reason: string) =>
-		request<AdminDocumentBatch>("POST", `/admin/documentation/batches/${encodeURIComponent(id)}/resume`, { reason }),
-	cancelAdminBatch: (id: string, reason: string) =>
-		request<AdminDocumentBatch>("POST", `/admin/documentation/batches/${encodeURIComponent(id)}/cancel`, { reason }),
-	retryFailedAdminBatch: (id: string, reason: string) =>
-		request<AdminDocumentBatch>("POST", `/admin/documentation/batches/${encodeURIComponent(id)}/retry-failed`, { reason }),
-	getAdminWorkflow: (id: string) =>
-		request<AdminDocumentationWorkflowDetail>("GET", `/admin/documentation/workflows/${id}`),
-	forceFailAdminWorkflow: (id: string, reason: string) =>
-		request<AdminDocumentationWorkflow>("POST", `/admin/documentation/workflows/${id}/force-fail`, { reason }),
-	restartAdminWorkflow: (id: string, reason: string) =>
-		request<AdminDocumentationWorkflow>("POST", `/admin/documentation/workflows/${id}/restart`, { reason }),
 	listAdminAudit: ({ cursor, limit = 20, action, user_id }: { cursor?: string; limit?: number; action?: string; user_id?: string }) => {
 		const query = new URLSearchParams({ limit: String(limit) });
 		if (cursor) query.set("cursor", cursor);
@@ -421,11 +319,5 @@ export const api = {
 		if (user_id) query.set("user_id", user_id);
 		return request<AdminAuditPage>("GET", `/admin/audit?${query.toString()}`);
 	},
-	listAdminRunnableActions: (state?: string, phase?: string) => {
-		const query = new URLSearchParams();
-		if (state) query.set("state", state);
-		if (phase) query.set("phase", phase);
-		const suffix = query.size ? `?${query.toString()}` : "";
-		return request<AdminRunnableActionPage>("GET", `/admin/runnable-actions${suffix}`);
-	},
+
 };

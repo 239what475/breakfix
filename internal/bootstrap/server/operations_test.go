@@ -34,25 +34,3 @@ func TestOperationsRuntimeConfigRejectsInvalidResource(t *testing.T) {
 		t.Fatal("invalid Node memory was accepted")
 	}
 }
-
-func TestDocumentationProfilesAreFixedToTheKubernetesPodLifecycleRuntime(t *testing.T) {
-	cfg := config.Config{Runtime: config.RuntimeConfig{
-		Node: config.NodeRuntimeConfig{ProfileRevision: "node-profile", NetworkPolicyRevision: "node-network"},
-		K8s:  config.K8sRuntimeConfig{BaseImageDigest: "registry.example/base@sha256:" + strings.Repeat("b", 64), ManagementTerminalImage: "registry.example/base@sha256:" + strings.Repeat("b", 64), ProfileRevision: "k8s-profile", Version: "v1.36", Resources: config.K8sResourceConfig{ControlPlaneCPU: "1", ControlPlaneMemory: "1Gi", ControlPlaneEphemeralStorage: "1Gi", WorkloadCPU: "1", WorkloadMemory: "512Mi", WorkloadEphemeralStorage: "1Gi", QuotaCPU: "3", QuotaMemory: "3Gi", QuotaEphemeralStorage: "30Gi"}, Network: config.K8sNetworkConfig{PublicEgressCIDR: "0.0.0.0/0", ProtectedCIDRs: []string{"10.0.0.0/8"}}},
-	}}
-	profiles, err := newDocumentationProfiles(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	constraint := profiles.DocumentationRuntimeConstraints()[0]
-	if constraint.Runtime != "k8s" || constraint.Network != "isolated" || profiles.DocumentationLifecyclePolicy().MaxLifetimeSeconds != documentationMaxLifetimeSeconds {
-		t.Fatalf("documentation profile = %#v %#v", constraint, profiles.DocumentationLifecyclePolicy())
-	}
-	if _, err := profiles.ResolveDocumentationRuntimeProfile(constraint); err != nil {
-		t.Fatal(err)
-	}
-	constraint.Topology = "expanded"
-	if _, err := profiles.ResolveDocumentationRuntimeProfile(constraint); err == nil {
-		t.Fatal("unapproved documentation runtime constraint was accepted")
-	}
-}

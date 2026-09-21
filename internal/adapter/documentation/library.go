@@ -16,7 +16,6 @@ import (
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/docsproject"
-	domain "github.com/breakfix/breakfix/internal/domain/documentpractice"
 )
 
 // MaxLibraryManifestBytes bounds the global manifest and page manifests read
@@ -42,7 +41,7 @@ type LibraryIdentity struct {
 // (docs-project output). The library carries its own generator identity; the
 // server build does not assert one.
 type Library struct {
-	Context    domain.DocumentContext
+	Context    DocumentContext
 	Root       string
 	global     docsproject.GlobalManifest
 	assetIndex map[string]string
@@ -58,8 +57,8 @@ func NewPinnedLibrary(identity LibraryIdentity, libraryRoot string) (Library, er
 	if strings.TrimSpace(libraryRoot) == "" {
 		return Library{}, errors.New("documentation library root is required")
 	}
-	expected := domain.DocumentContext{
-		FormatVersion: domain.FormatVersion, SourceID: identity.SourceID, Repository: identity.Repository,
+	expected := DocumentContext{
+		FormatVersion: FormatVersion, SourceID: identity.SourceID, Repository: identity.Repository,
 		Commit: identity.Commit, Version: identity.Version, Language: identity.Language, License: identity.License,
 	}
 	if expected.SourceID == "" || expected.Repository == "" || expected.Commit == "" || expected.Version == "" || expected.Language == "" || expected.License == "" {
@@ -109,9 +108,6 @@ func libraryContains(pages []string, pagePath string) bool {
 	return false
 }
 
-type Page = domain.Page
-type Metadata = domain.Metadata
-
 func (l Library) ReadPage(path, anchor string) (Page, error) {
 	normalized := strings.TrimSuffix(strings.TrimSpace(path), "/")
 	if !libraryContains(l.global.Pages, normalized) {
@@ -136,7 +132,7 @@ func (l Library) ReadPage(path, anchor string) (Page, error) {
 
 // evidenceContext extends the pinned upstream context with the evidence
 // triple attributes: the offline parser version and the parsed page digest.
-func (l Library) evidenceContext(manifest docsproject.PageManifest) domain.DocumentContext {
+func (l Library) evidenceContext(manifest docsproject.PageManifest) DocumentContext {
 	context := l.Context
 	context.ParserVersion = manifest.GeneratorVersion
 	context.PageDigest = manifest.Digest
@@ -151,7 +147,7 @@ func (l Library) Identity() (parserVersion, upstreamCommit string) {
 
 // PinnedContext returns the verified source/commit/language identity that
 // reader queries (such as the published practices index) must be scoped to.
-func (l Library) PinnedContext() domain.DocumentContext {
+func (l Library) PinnedContext() DocumentContext {
 	return l.Context
 }
 
@@ -469,7 +465,7 @@ func readRootFile(root, path string, limit int64) (string, error) {
 }
 
 func readRootFileVerified(root, path string, limit int64) (string, string, error) {
-	if err := domain.ValidateRelativePath(path); err != nil {
+	if err := ValidateRelativePath(path); err != nil {
 		return "", "", err
 	}
 	full := filepath.Join(root, filepath.FromSlash(path))

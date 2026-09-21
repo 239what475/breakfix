@@ -15,9 +15,9 @@ func TestEnvironmentObjectMetaCarriesGenericContentIdentity(t *testing.T) {
 	if operations.Labels["breakfix.dev/content-kind"] != "operations" || operations.Labels["breakfix.dev/content-id"] != "demo" || operations.Labels["breakfix.dev/content-revision"] != "chrev-aaaaaaaaaaaaaaaa" {
 		t.Fatalf("environment labels = %#v", operations.Labels)
 	}
-	practice := environmentObjectMeta("learning-practice", "breakfix-system", "u-demo", environmentContentDocumentationPractice, "practice-01", "runnable-revision-01", runtimev2.PurposeLearning)
-	if practice.Labels["breakfix.dev/content-kind"] != "documentation-practice" || practice.Labels["breakfix.dev/content-id"] != "practice-01" {
-		t.Fatalf("practice environment labels = %#v", practice.Labels)
+	blank := environmentObjectMeta("learning-blank", "breakfix-system", "u-demo", environmentContentDocumentationBlank, "blank-01", "blank-01", runtimev2.PurposeLearning)
+	if blank.Labels["breakfix.dev/content-kind"] != "documentation-blank" || blank.Labels["breakfix.dev/content-id"] != "blank-01" || blank.Labels["breakfix.dev/content-revision"] != "blank-01" {
+		t.Fatalf("blank environment labels = %#v", blank.Labels)
 	}
 	if _, found := operations.Labels["breakfix.dev/scenario"]; found {
 		t.Fatalf("environment metadata retained a scenario-specific label: %#v", operations.Labels)

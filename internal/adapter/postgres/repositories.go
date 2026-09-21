@@ -21,6 +21,4 @@ type ReportingRepository struct{ conn *Conn }
 
 type RunnableRepository struct{ conn *Conn }
 
-type DocumentPracticeRepository struct{ conn *Conn }
-
 type HumanActionRepository struct{ conn *Conn }

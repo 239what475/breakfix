@@ -16,18 +16,17 @@ import (
 type Store struct {
 	conn *Conn
 
-	Agent            *AgentRepository
-	Authoring        *AuthoringRepository
-	Catalog          *CatalogRepository
-	Scenario         *ScenarioRepository
-	Environment      *EnvironmentRepository
-	Generation       *GenerationRepository
-	Identity         *IdentityRepository
-	Publication      *PublicationRepository
-	Reporting        *ReportingRepository
-	Runnable         *RunnableRepository
-	DocumentPractice *DocumentPracticeRepository
-	Audit            *HumanActionRepository
+	Agent       *AgentRepository
+	Authoring   *AuthoringRepository
+	Catalog     *CatalogRepository
+	Scenario    *ScenarioRepository
+	Environment *EnvironmentRepository
+	Generation  *GenerationRepository
+	Identity    *IdentityRepository
+	Publication *PublicationRepository
+	Reporting   *ReportingRepository
+	Runnable    *RunnableRepository
+	Audit       *HumanActionRepository
 }
 
 // New opens a PostgreSQL DSN and applies the current schema. Existing SQLite
@@ -66,19 +65,18 @@ func open(dsn string, migrate bool) (*Store, error) {
 
 func newStore(conn *Conn) *Store {
 	return &Store{
-		conn:             conn,
-		Agent:            &AgentRepository{conn: conn},
-		Authoring:        &AuthoringRepository{conn: conn},
-		Catalog:          &CatalogRepository{conn: conn},
-		Scenario:         &ScenarioRepository{conn: conn},
-		Environment:      &EnvironmentRepository{conn: conn},
-		Generation:       &GenerationRepository{conn: conn},
-		Identity:         &IdentityRepository{conn: conn},
-		Publication:      &PublicationRepository{conn: conn},
-		Reporting:        &ReportingRepository{conn: conn},
-		Runnable:         &RunnableRepository{conn: conn},
-		DocumentPractice: &DocumentPracticeRepository{conn: conn},
-		Audit:            &HumanActionRepository{conn: conn},
+		conn:        conn,
+		Agent:       &AgentRepository{conn: conn},
+		Authoring:   &AuthoringRepository{conn: conn},
+		Catalog:     &CatalogRepository{conn: conn},
+		Scenario:    &ScenarioRepository{conn: conn},
+		Environment: &EnvironmentRepository{conn: conn},
+		Generation:  &GenerationRepository{conn: conn},
+		Identity:    &IdentityRepository{conn: conn},
+		Publication: &PublicationRepository{conn: conn},
+		Reporting:   &ReportingRepository{conn: conn},
+		Runnable:    &RunnableRepository{conn: conn},
+		Audit:       &HumanActionRepository{conn: conn},
 	}
 }
 

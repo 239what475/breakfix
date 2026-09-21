@@ -4,10 +4,7 @@ import {
 	CircleDot,
 	DoorOpen,
 	KeyRound,
-	Play,
-	RotateCcw,
 	Search,
-	Zap,
 	type LucideIcon,
 } from "lucide-vue-next";
 import { useAdminAudit } from "./admin";
@@ -30,9 +27,6 @@ watch(
 );
 
 const ACTION_ICONS: Record<string, { icon: LucideIcon; tone?: "red" | "amber" }> = {
-	"documentation.practice.start": { icon: Play },
-	"documentation.workflow.force_fail": { icon: Zap, tone: "red" },
-	"documentation.workflow.restart": { icon: RotateCcw, tone: "amber" },
 	"user.totp.reset": { icon: KeyRound },
 	"environment.release": { icon: DoorOpen },
 };
@@ -58,7 +52,7 @@ function applyFilters() {
 	<section class="admin-section" aria-labelledby="admin-audit-title">
 		<h2 id="admin-audit-title" class="admin-section-title">操作审计</h2>
 		<form class="admin-audit-filters" @submit.prevent="applyFilters">
-			<label><span>action</span><input v-model="actionInput" type="search" placeholder="documentation.workflow.force_fail" /></label>
+			<label><span>action</span><input v-model="actionInput" type="search" placeholder="environment.release" /></label>
 			<label><span>user_id</span><input v-model="userInput" type="search" placeholder="u-..." /></label>
 			<button class="compact-button" type="submit"><Search :size="13" aria-hidden="true" />过滤</button>
 		</form>
