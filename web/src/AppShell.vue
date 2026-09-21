@@ -10,6 +10,7 @@ import AdminPage from "./features/admin/AdminPage.vue";
 import { isLoggedIn, tokenUserRole } from "./api/client";
 import ScenarioWorkspace from "./features/workspace/ScenarioWorkspace.vue";
 import { useScenarioSession } from "./features/workspace/useScenarioSession";
+import PlaygroundDock from "./features/playground/PlaygroundDock.vue";
 
 // The documentation reader (markdown-it + Shiki) loads as its own chunk so
 // the primary bundle stays lean.
@@ -45,8 +46,8 @@ watch(
 	{ immediate: true },
 );
 const mySpaceRefreshRequest = ref(0);
-// Incremented on every successful login so mounted pages can resume an
-// auth-gated flow (the reader's pending practice start).
+// Incremented on every successful login so mounted surfaces can resume an
+// auth-gated flow (the playground reconciles the new identity's session).
 const authSignal = ref(0);
 const catalogFocusId = ref<string>();
 const notice = ref<{ text: string; kind: "error" | "info" } | null>(null);
@@ -233,5 +234,8 @@ onUnmounted(() => window.removeEventListener("popstate", handlePopState));
       @close="authOpen = false"
       @authenticated="handleAuthenticated"
     />
+    <!-- The playground is the user's own practice environment, present on
+         every page; anonymous visitors see nothing and no request fires. -->
+    <PlaygroundDock v-if="loggedIn" :auth-signal="authSignal" @notice="notify" />
   </div>
 </template>

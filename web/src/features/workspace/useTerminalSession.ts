@@ -33,6 +33,19 @@ export function scenarioTerminalChannel(scenarioId: string): TerminalChannel {
   };
 }
 
+// The playground is one session per user: its terminal rides fixed paths
+// with no content identifier.
+export function playgroundTerminalChannel(): TerminalChannel {
+  return {
+    ticket: (window, node) =>
+      api
+        .createPlaygroundTerminalTicket(window, node)
+        .then((response) => response.ticket),
+    socket: (window, ticket, node) =>
+      terminalSocketURL("/api/playground/terminal", window, ticket, node),
+  };
+}
+
 export function useTerminalSession(
   host: Readonly<Ref<HTMLDivElement | undefined>>,
   channel: Readonly<Ref<TerminalChannel | null>>,

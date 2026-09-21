@@ -1,0 +1,175 @@
+/* The persistent floating ball: the playground entry on every page. Its
+   affordance is the session state — a spinner while creating, a dot when
+   ready, a retry glyph when failed. */
+.playground-fab {
+  position: fixed;
+  z-index: 60;
+  right: 18px;
+  bottom: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  box-shadow: 0 6px 18px rgb(15 23 42 / 12%);
+  cursor: pointer;
+}
+
+.playground-fab:hover,
+.playground-fab:focus-visible {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.playground-fab[data-state="ready"] {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.playground-fab[data-state="failed"] {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.playground-fab-spinner {
+  position: absolute;
+  inset: -4px;
+  border: 2px solid transparent;
+  border-top-color: var(--green);
+  border-right-color: var(--green);
+  border-radius: 999px;
+  animation: playground-spin 1s linear infinite;
+}
+
+.playground-fab-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--green);
+}
+
+@keyframes playground-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.playground-fab .spinning {
+  animation: playground-spin 1s linear infinite;
+}
+
+/* The panel is a drawer docked above the ball; on small screens it becomes a
+   bottom sheet. */
+.playground-panel {
+  position: fixed;
+  z-index: 60;
+  right: 18px;
+  bottom: 76px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(480px, calc(100vw - 36px));
+  max-height: min(560px, calc(100vh - 120px));
+  min-height: 320px;
+  padding: 16px 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgb(15 23 42 / 18%);
+}
+
+.playground-panel:focus-visible {
+  outline: 2px solid var(--green);
+}
+
+.playground-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.playground-panel-kicker {
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.playground-panel-title {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.playground-panel-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.playground-panel-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  background: var(--wash);
+  font-size: 12px;
+}
+
+.playground-panel-state-error {
+  color: var(--red);
+}
+
+.playground-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.playground-panel-terminal {
+  display: flex;
+  flex-direction: column;
+  min-height: 240px;
+  flex: 1 1 auto;
+}
+
+.playground-panel-terminal .terminal-body {
+  flex: 1 1 auto;
+  min-height: 200px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 900px) {
+  .playground-panel {
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    max-height: 78vh;
+    border-radius: 10px 10px 0 0;
+  }
+}

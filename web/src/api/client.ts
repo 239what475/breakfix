@@ -14,6 +14,8 @@ import type {
 import type {
 	DocumentationPageResponse,
 	DocumentationTreeResponse,
+	PlaygroundCloseResponse,
+	PlaygroundEnvironment,
 	ScenarioList,
 	ScenarioProgress,
 	CloseTerminalWindowResponse,
@@ -248,6 +250,14 @@ export const api = {
 			"GET",
 			path ? `/documentation/tree?path=${encodeURIComponent(path)}` : "/documentation/tree",
 		),
+	// One playground per user, bound to the user alone and carried across the
+	// whole site.
+	getPlayground: () => request<PlaygroundEnvironment>("GET", "/playground"),
+	createPlayground: () => request<PlaygroundEnvironment>("POST", "/playground"),
+	resetPlayground: () => request<PlaygroundEnvironment>("POST", "/playground/reset"),
+	closePlayground: () => request<PlaygroundCloseResponse>("DELETE", "/playground"),
+	createPlaygroundTerminalTicket: (window: string, node?: string) =>
+		request<TerminalTicketResponse>("POST", "/playground/terminal-ticket", { window, node }),
 	getMySpace: () => request<MySpace>("GET", "/me/space"),
 	getMySpaceLearning: ({ cursor, limit = 20, state, runtime }: MySpaceLearningQuery = {}) => {
 		const query = new URLSearchParams({ limit: String(limit) });
