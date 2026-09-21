@@ -3,6 +3,7 @@ package documentpractice
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -389,9 +390,19 @@ func (r *rejectingReviewer) opinion(runID string) domain.ReviewOpinion {
 	return domain.ReviewOpinion{ReviewerID: runID, Role: r.role, Decision: domain.ReviewApprove, PolicyVersion: "policy-v1"}
 }
 
-// newRetryPipeline assembles the full publication chain with injectable
-// reviewers so a test can reject a bounded number of attempts.
-func newRetryPipeline(t *testing.T, now time.Time, planReviewers []PlanReviewRole, artifactReviewers []CandidateReviewRole) (*AgentPipeline, *memoryDocumentStore, domain.Page) {
+// retryFixture assembles the full publication chain once and lets each test
+// inject its planner, generator, and reviewers.
+type retryFixture struct {
+	now       time.Time
+	plan      domain.LearningUnitPlan
+	page      domain.Page
+	blueprint CandidateBlueprint
+	profile   runnable.RuntimeProfile
+	revision  runnable.RunnableRevision
+	report    runnable.StoredVerificationReport
+}
+
+func newRetryFixture(t *testing.T, now time.Time) retryFixture {
 	t.Helper()
 	plan := validPlan()
 	plan.CreatedAt = now
@@ -403,19 +414,38 @@ func newRetryPipeline(t *testing.T, now time.Time, planReviewers []PlanReviewRol
 		t.Fatal(err)
 	}
 	revision, report := serviceRevisionAndReport(t, compiled, now, true)
+	return retryFixture{now: now, plan: plan, page: page, blueprint: blueprint, profile: seed.Spec.RuntimeProfile, revision: revision, report: report}
+}
+
+func (f retryFixture) service(t *testing.T) (*memoryDocumentStore, *Service) {
+	t.Helper()
 	store := newMemoryDocumentStore()
-	service, err := NewService(store, &memoryRunnableStore{revision: revision, report: report})
+	service, err := NewService(store, &memoryRunnableStore{revision: f.revision, report: f.report})
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.now = func() time.Time { return now }
-	pipeline, err := NewAgentPipeline(service, fakePlannerReader{page: page, metadata: domain.Metadata{Context: plan.Context, Path: page.Path, Title: plan.Title, Anchors: []string{"pod-lifecycle"}}}, fakePlanAgent{plan: plan}, planReviewers, pipelineGenerator{blueprint: blueprint}, artifactReviewers, []VerificationReviewRole{pipelineReviewer{role: "verification"}}, pipelineProfiles{profile: seed.Spec.RuntimeProfile}, AgentPipelineConfig{Model: "test-model", PromptVersion: "prompt-v1", ToolVersion: "tool-v1", PolicyVersion: "policy-v1"})
+	service.now = func() time.Time { return f.now }
+	return store, service
+}
+
+func (f retryFixture) pipeline(t *testing.T, service *Service, planner PlanningAgent, planReviewers []PlanReviewRole, generator BlueprintGenerator, artifactReviewers []CandidateReviewRole) *AgentPipeline {
+	t.Helper()
+	pipeline, err := NewAgentPipeline(service, fakePlannerReader{page: f.page, metadata: domain.Metadata{Context: f.plan.Context, Path: f.page.Path, Title: f.plan.Title, Anchors: []string{"pod-lifecycle"}}}, planner, planReviewers, generator, artifactReviewers, []VerificationReviewRole{pipelineReviewer{role: "verification"}}, pipelineProfiles{profile: f.profile}, AgentPipelineConfig{Model: "test-model", PromptVersion: "prompt-v1", ToolVersion: "tool-v1", PolicyVersion: "policy-v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	pipeline.now = func() time.Time { return now }
+	pipeline.now = func() time.Time { return f.now }
 	pipeline.newRunID = sequentialRunIDs()
-	return pipeline, store, page
+	return pipeline
+}
+
+// newRetryPipeline assembles the full publication chain with injectable
+// reviewers so a test can reject a bounded number of attempts.
+func newRetryPipeline(t *testing.T, now time.Time, planReviewers []PlanReviewRole, artifactReviewers []CandidateReviewRole) (*AgentPipeline, *memoryDocumentStore, domain.Page) {
+	t.Helper()
+	fixture := newRetryFixture(t, now)
+	store, service := fixture.service(t)
+	return fixture.pipeline(t, service, fakePlanAgent{plan: fixture.plan}, planReviewers, pipelineGenerator{blueprint: fixture.blueprint}, artifactReviewers), store, fixture.page
 }
 
 func countLedgerKinds(workflow domain.Workflow) map[string]int {
@@ -571,5 +601,138 @@ func TestAgentPipelineHardGateRejectionNeverAutoRestarts(t *testing.T) {
 		if !gate.HardReject {
 			t.Fatalf("gate result lost the hard-reject flag: %#v", gate)
 		}
+	}
+}
+
+// feedbackPlanAgent records every planning call: the Server-resolved
+// constraints and the rejection feedback the retry loop threaded through.
+type feedbackPlanAgent struct {
+	plan  domain.LearningUnitPlan
+	calls []feedbackPlanCall
+}
+
+type feedbackPlanCall struct {
+	constraints []domain.RuntimeConstraint
+	feedback    []GateFeedback
+}
+
+func (a *feedbackPlanAgent) Propose(context.Context, domain.Page, domain.Metadata, []domain.EvidenceReference) (domain.LearningUnitPlan, error) {
+	a.calls = append(a.calls, feedbackPlanCall{})
+	return a.plan, nil
+}
+
+func (a *feedbackPlanAgent) ProposeConstrained(_ context.Context, _ domain.Page, _ domain.Metadata, _ []domain.EvidenceReference, constraints []domain.RuntimeConstraint) (domain.LearningUnitPlan, error) {
+	a.calls = append(a.calls, feedbackPlanCall{constraints: constraints})
+	return a.plan, nil
+}
+
+func (a *feedbackPlanAgent) ProposeWithFeedback(_ context.Context, _ domain.Page, _ domain.Metadata, _ []domain.EvidenceReference, constraints []domain.RuntimeConstraint, feedback []GateFeedback) (domain.LearningUnitPlan, error) {
+	a.calls = append(a.calls, feedbackPlanCall{constraints: constraints, feedback: feedback})
+	return a.plan, nil
+}
+
+// feedbackGenerator records the rejection feedback of each generation call.
+type feedbackGenerator struct {
+	blueprint CandidateBlueprint
+	calls     [][]GateFeedback
+}
+
+func (g *feedbackGenerator) Generate(context.Context, domain.LearningUnitPlan, runnable.RuntimeProfile, runnable.LifecyclePolicy) (CandidateBlueprint, error) {
+	g.calls = append(g.calls, nil)
+	return g.blueprint, nil
+}
+
+func (g *feedbackGenerator) GenerateWithFeedback(_ context.Context, _ domain.LearningUnitPlan, _ runnable.RuntimeProfile, _ runnable.LifecyclePolicy, feedback []GateFeedback) (CandidateBlueprint, error) {
+	g.calls = append(g.calls, feedback)
+	return g.blueprint, nil
+}
+
+func TestAgentPipelineFeedsGateRejectionIntoTheNextAttempt(t *testing.T) {
+	now := time.Date(2026, 9, 21, 14, 0, 0, 0, time.UTC)
+	fixture := newRetryFixture(t, now)
+	_, service := fixture.service(t)
+	planner := &feedbackPlanAgent{plan: fixture.plan}
+	generator := &feedbackGenerator{blueprint: fixture.blueprint}
+	reasons := []string{"startup recreates the observed file on every boot; the disappearance assertion can never hold"}
+	pipeline := fixture.pipeline(t, service, planner,
+		[]PlanReviewRole{&rejectingReviewer{role: "evidence", rejections: 1, reasons: reasons}, pipelineReviewer{role: "value"}},
+		generator,
+		[]CandidateReviewRole{pipelineReviewer{role: "safety"}, pipelineReviewer{role: "consistency"}})
+
+	started, err := pipeline.Start(context.Background(), "agent-pipeline-feedback", fixture.page.Path, "", nil)
+	if err != nil || started.Workflow.State != domain.MaterializingArtifact {
+		t.Fatalf("feedback retry start = %#v, %v", started.Workflow, err)
+	}
+	if len(planner.calls) != 2 {
+		t.Fatalf("planner calls = %d, want one per attempt", len(planner.calls))
+	}
+	// The first attempt runs feedback-free through the constrained path.
+	if len(planner.calls[0].feedback) != 0 || len(planner.calls[0].constraints) == 0 {
+		t.Fatalf("first planning call = %#v, want server constraints without feedback", planner.calls[0])
+	}
+	// The retried attempt receives the rejection as feedback while the
+	// constraints stay the Server-resolved set: feedback replaces nothing.
+	got := planner.calls[1].feedback
+	wantReasons := append([]string{"evidence: rejected"}, reasons...)
+	if len(got) != 1 || got[0].Gate != "plan-gate" || got[0].Attempt != 1 || !reflect.DeepEqual(got[0].Reasons, wantReasons) {
+		t.Fatalf("retried planning feedback = %#v, want plan-gate attempt 1 with reasons %#v", got, wantReasons)
+	}
+	if len(planner.calls[1].constraints) != len(planner.calls[0].constraints) {
+		t.Fatalf("feedback changed the server-resolved constraints: %#v -> %#v", planner.calls[0].constraints, planner.calls[1].constraints)
+	}
+	if len(generator.calls) != 1 || len(generator.calls[0]) != 1 || generator.calls[0][0].Gate != "plan-gate" || !reflect.DeepEqual(generator.calls[0][0].Reasons, wantReasons) {
+		t.Fatalf("generator feedback calls = %#v, want the same rejection feedback", generator.calls)
+	}
+}
+
+func TestAgentPipelineDerivesGateFeedbackFromLedgerOnReignition(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 9, 21, 15, 0, 0, 0, time.UTC)
+	fixture := newRetryFixture(t, now)
+	_, service := fixture.service(t)
+
+	// Durable state as an interrupted retry loop leaves it: attempt 1 was
+	// gate-rejected and internally restarted, and the process died before the
+	// next ignition. Nothing in memory carries the rejection.
+	workflow, err := service.Start(ctx, "agent-pipeline-feedback-recovery", testPageIdentity(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planAudit := serviceAudit(t, "planner-ledger", "planner", fixture.plan)
+	_, planArtifact, err := service.SubmitPlan(ctx, workflow.ID, fixture.plan, planAudit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opinions := []domain.ReviewOpinion{
+		{ReviewerID: "review-evidence", Role: "evidence", Decision: domain.ReviewReject, Reasons: []string{"observation ungrounded"}, PolicyVersion: "review-v1"},
+		{ReviewerID: "review-value", Role: "value", Decision: domain.ReviewApprove, PolicyVersion: "review-v1"},
+	}
+	bundle := ReviewBundle{ArtifactID: planArtifact.ID, ArtifactDigest: planArtifact.Digest, Opinions: opinions, CreatedAt: now}
+	audits := []domain.AgentAudit{serviceAudit(t, "review-evidence", "plan-review", opinions[0]), serviceAudit(t, "review-value", "plan-review", opinions[1])}
+	rejectedWorkflow, gate, err := service.GatePlan(ctx, workflow.ID, planAudit.RunID, planArtifact, bundle, audits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted, retry, err := service.AutoRestart(ctx, workflow.ID, "plan-gate", gate, rejectedWorkflow)
+	if err != nil || !retry || restarted.State != domain.Planning || restarted.Revision != 2 {
+		t.Fatalf("auto restart before reignition = %#v %t %v", restarted, retry, err)
+	}
+
+	planner := &feedbackPlanAgent{plan: fixture.plan}
+	pipeline := fixture.pipeline(t, service, planner,
+		[]PlanReviewRole{pipelineReviewer{role: "evidence"}, pipelineReviewer{role: "value"}},
+		pipelineGenerator{blueprint: fixture.blueprint},
+		[]CandidateReviewRole{pipelineReviewer{role: "safety"}, pipelineReviewer{role: "consistency"}})
+	started, err := pipeline.Start(ctx, workflow.ID, fixture.page.Path, "", nil)
+	if err != nil || started.Workflow.State != domain.MaterializingArtifact {
+		t.Fatalf("reignited start = %#v, %v", started.Workflow, err)
+	}
+	if len(planner.calls) != 1 || len(planner.calls[0].feedback) != 1 {
+		t.Fatalf("reignition planning calls = %#v, want one ledger-derived feedback", planner.calls)
+	}
+	got := planner.calls[0].feedback[0]
+	wantReasons := []string{"evidence: rejected", "observation ungrounded"}
+	if got.Gate != "plan-gate" || got.Attempt != 1 || !reflect.DeepEqual(got.Reasons, wantReasons) {
+		t.Fatalf("ledger-derived feedback = %#v, want plan-gate attempt 1 with reasons %#v", got, wantReasons)
 	}
 }

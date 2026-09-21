@@ -48,6 +48,32 @@ type ConstrainedPlanningAgent interface {
 	ProposeConstrained(context.Context, domain.Page, domain.Metadata, []domain.EvidenceReference, []domain.RuntimeConstraint) (domain.LearningUnitPlan, error)
 }
 
+// GateFeedback is the trusted, server-stamped rejection record of a previous
+// attempt, replayed into the next planner and generator prompts. It mirrors
+// the operations side's last_error contract: only gate reasons travel - never
+// document text - so the untrusted-data principle is untouched.
+type GateFeedback struct {
+	// Gate names the rejecting ledger gate kind: plan-gate or artifact-gate.
+	Gate string `json:"gate"`
+	// Attempt is the workflow revision that was rejected.
+	Attempt int64    `json:"attempt"`
+	Reasons []string `json:"reasons"`
+}
+
+// FeedbackPlanningAgent is the feedback-aware planner capability. The pipeline
+// discovers it by type assertion, so an adapter receives rejection feedback
+// only by implementing the interface explicitly - and when it does not, the
+// retry loop still restarts, just without prompt feedback.
+type FeedbackPlanningAgent interface {
+	ProposeWithFeedback(context.Context, domain.Page, domain.Metadata, []domain.EvidenceReference, []domain.RuntimeConstraint, []GateFeedback) (domain.LearningUnitPlan, error)
+}
+
+// FeedbackBlueprintGenerator is the feedback-aware generator capability, with
+// the same explicit-capability semantics as FeedbackPlanningAgent.
+type FeedbackBlueprintGenerator interface {
+	GenerateWithFeedback(context.Context, domain.LearningUnitPlan, runnable.RuntimeProfile, runnable.LifecyclePolicy, []GateFeedback) (CandidateBlueprint, error)
+}
+
 type AgentPipelineConfig struct {
 	Model         string
 	PromptVersion string
@@ -129,8 +155,12 @@ func (p *AgentPipeline) Start(ctx context.Context, workflowID, pagePath, anchor 
 	if err != nil {
 		return PipelineStartResult{}, err
 	}
+	// A re-ignited restarted workflow resumes with the feedback context the
+	// interrupted loop would have carried: the rejection reasons are rebuilt
+	// from the immutable ledger, never from process memory.
+	feedback := gateFeedbackFromLedger(workflow)
 	for {
-		result, rejection, err := p.attempt(ctx, workflow, page, metadata, evidence, input, pagePath, anchor)
+		result, rejection, err := p.attempt(ctx, workflow, page, metadata, evidence, input, pagePath, anchor, feedback)
 		if err != nil || rejection == nil {
 			return result, err
 		}
@@ -146,7 +176,10 @@ func (p *AgentPipeline) Start(ctx context.Context, workflowID, pagePath, anchor 
 		}
 		// The restarted attempt re-plans into fresh, attempt-namespaced ledger
 		// entries; revision strictly advances per restart, so the loop is
-		// bounded by max_revisions.
+		// bounded by max_revisions. The rejection reasons ride along as the
+		// next attempt's prompt feedback - the equivalent of the operations
+		// side's last_error re-entry.
+		feedback = []GateFeedback{{Gate: rejection.gateKind, Attempt: rejection.workflow.Revision, Reasons: rejection.gate.Reasons}}
 		workflow = restarted
 	}
 }
@@ -159,13 +192,15 @@ type gateRejection struct {
 }
 
 // attempt runs one full Agent chain from Planning. It returns either the
-// chain's outcome or the gate rejection that ended it, never both.
-func (p *AgentPipeline) attempt(ctx context.Context, workflow domain.Workflow, page domain.Page, metadata domain.Metadata, evidence []domain.EvidenceReference, input AgentInput, pagePath, anchor string) (PipelineStartResult, *gateRejection, error) {
+// chain's outcome or the gate rejection that ended it, never both. The
+// feedback parameter carries the previous attempt's gate rejection into the
+// planner and generator prompts when those roles have the capability.
+func (p *AgentPipeline) attempt(ctx context.Context, workflow domain.Workflow, page domain.Page, metadata domain.Metadata, evidence []domain.EvidenceReference, input AgentInput, pagePath, anchor string, feedback []GateFeedback) (PipelineStartResult, *gateRejection, error) {
 	plannerRun, err := p.newRunID("planner")
 	if err != nil {
 		return PipelineStartResult{}, nil, err
 	}
-	plan, err := p.proposePlan(ctx, page, metadata, evidence)
+	plan, err := p.proposePlan(ctx, page, metadata, evidence, feedback)
 	if err != nil {
 		return PipelineStartResult{}, nil, err
 	}
@@ -207,7 +242,7 @@ func (p *AgentPipeline) attempt(ctx context.Context, workflow domain.Workflow, p
 		return PipelineStartResult{}, nil, err
 	}
 	lifecycle := p.profiles.DocumentationLifecyclePolicy()
-	blueprint, err := p.generator.Generate(ctx, plan, profile, lifecycle)
+	blueprint, err := p.generateBlueprint(ctx, plan, profile, lifecycle, feedback)
 	if err != nil {
 		return PipelineStartResult{}, nil, err
 	}
@@ -253,11 +288,56 @@ func (p *AgentPipeline) attempt(ctx context.Context, workflow domain.Workflow, p
 	return PipelineStartResult{Workflow: workflow, MaterializationAction: action}, nil, nil
 }
 
-func (p *AgentPipeline) proposePlan(ctx context.Context, page domain.Page, metadata domain.Metadata, evidence []domain.EvidenceReference) (domain.LearningUnitPlan, error) {
+func (p *AgentPipeline) proposePlan(ctx context.Context, page domain.Page, metadata domain.Metadata, evidence []domain.EvidenceReference, feedback []GateFeedback) (domain.LearningUnitPlan, error) {
+	constraints := p.profiles.DocumentationRuntimeConstraints()
+	if planner, ok := p.planner.(FeedbackPlanningAgent); ok && len(feedback) > 0 {
+		return planner.ProposeWithFeedback(ctx, page, metadata, evidence, constraints, feedback)
+	}
 	if planner, ok := p.planner.(ConstrainedPlanningAgent); ok {
-		return planner.ProposeConstrained(ctx, page, metadata, evidence, p.profiles.DocumentationRuntimeConstraints())
+		return planner.ProposeConstrained(ctx, page, metadata, evidence, constraints)
 	}
 	return p.planner.Propose(ctx, page, metadata, evidence)
+}
+
+// generateBlueprint routes generation through the feedback-aware capability
+// when the generator implements it and a previous attempt left feedback. The
+// Server-resolved profile and lifecycle are identical on both paths.
+func (p *AgentPipeline) generateBlueprint(ctx context.Context, plan domain.LearningUnitPlan, profile runnable.RuntimeProfile, lifecycle runnable.LifecyclePolicy, feedback []GateFeedback) (CandidateBlueprint, error) {
+	if generator, ok := p.generator.(FeedbackBlueprintGenerator); ok && len(feedback) > 0 {
+		return generator.GenerateWithFeedback(ctx, plan, profile, lifecycle, feedback)
+	}
+	return p.generator.Generate(ctx, plan, profile, lifecycle)
+}
+
+// gateFeedbackFromLedger rebuilds the rejection feedback of the immediately
+// previous attempt from the immutable ledger - the recovery path for a retry
+// loop interrupted between the restart commit and the next attempt's ignition.
+// An approved or absent gate in that attempt means no gate rejected it (a
+// fresh workflow, a verification failure, or an administrative restart), and
+// no feedback applies.
+func gateFeedbackFromLedger(workflow domain.Workflow) []GateFeedback {
+	if workflow.Revision < 2 {
+		return nil
+	}
+	suffix := fmt.Sprintf("-a%d", workflow.Revision-1)
+	var newest domain.ArtifactRecord
+	var newestGate domain.GateResult
+	for _, artifact := range workflow.Artifacts {
+		if (artifact.Kind != "plan-gate" && artifact.Kind != "artifact-gate") || !strings.HasSuffix(artifact.ID, suffix) {
+			continue
+		}
+		var gate domain.GateResult
+		if err := json.Unmarshal(artifact.Payload, &gate); err != nil || gate.Approved() {
+			continue
+		}
+		if newest.ID == "" || !artifact.CreatedAt.Before(newest.CreatedAt) {
+			newest, newestGate = artifact, gate
+		}
+	}
+	if newest.ID == "" {
+		return nil
+	}
+	return []GateFeedback{{Gate: newest.Kind, Attempt: workflow.Revision - 1, Reasons: newestGate.Reasons}}
 }
 
 type PipelineReconcileResult struct {

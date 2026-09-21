@@ -191,7 +191,7 @@ func newDocumentationPipeline(cfg config.Config, database *postgres.Store) (*app
 		service, reader, llm.NewDocumentPlanner(cfg.Agent),
 		[]app.PlanReviewRole{evidence, value}, llm.NewDocumentGenerator(cfg.Agent),
 		[]app.CandidateReviewRole{safety, consistency}, []app.VerificationReviewRole{verification}, profiles,
-		app.AgentPipelineConfig{Model: strings.TrimSpace(cfg.Agent.Model), PromptVersion: "document-prompt-v2", ToolVersion: "document-tools-v2", PolicyVersion: documentationPolicyVersion},
+		app.AgentPipelineConfig{Model: strings.TrimSpace(cfg.Agent.Model), PromptVersion: "document-prompt-v3", ToolVersion: "document-tools-v2", PolicyVersion: documentationPolicyVersion},
 	)
 	if err != nil {
 		return nil, nil, nil, err
