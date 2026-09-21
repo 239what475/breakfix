@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -286,7 +287,8 @@ type memoryDocumentStore struct {
 	watchdogStatuses map[string]WatchdogActionStatus
 	watchdogReasons  map[string]string
 
-	adminTransitions []memoryAdminTransition
+	adminTransitions     []memoryAdminTransition
+	pipelineAutoRestarts []memoryPipelineAutoRestart
 }
 
 type memoryDocumentAction struct {
@@ -356,6 +358,49 @@ func (s *memoryDocumentStore) RestartWorkflow(_ context.Context, id, reason stri
 		s.humanActions = append(s.humanActions, *action)
 	}
 	return workflow, nil
+}
+
+func (s *memoryDocumentStore) AutoRestartWorkflow(_ context.Context, id, gateKind string, reasons []string, expectedStateVersion int64, now time.Time) (domain.Workflow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	workflow, err := s.getWorkflowUnlocked(id)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	if workflow.StateVersion != expectedStateVersion {
+		return domain.Workflow{}, fmt.Errorf("%w (workflow moved to %s v%d)", domain.ErrWorkflowConflict, workflow.State, workflow.StateVersion)
+	}
+	fromState := workflow.State
+	if err := workflow.RestartAt(now); err != nil {
+		return domain.Workflow{}, fmt.Errorf("%w (%s)", domain.ErrWorkflowConflict, err.Error())
+	}
+	payload, err := json.Marshal(struct {
+		System    string    `json:"system"`
+		FromState string    `json:"from_state"`
+		Gate      string    `json:"gate"`
+		Reasons   []string  `json:"reasons"`
+		At        time.Time `json:"at"`
+	}{System: "documentation-pipeline", FromState: string(fromState), Gate: gateKind, Reasons: reasons, At: now.UTC()})
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	digest, err := domain.DigestAgentInput(payload)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	entry := domain.ArtifactRecord{ID: "pipeline.auto_restart-" + id + "-v" + strconv.FormatInt(workflow.StateVersion, 10), Kind: "pipeline.auto_restart", ContentRevision: strconv.FormatInt(workflow.Revision, 10), Digest: digest, SchemaVersion: domain.FormatVersion, OwnerRole: "system", CreatedAt: now.UTC(), Payload: payload}
+	if err := workflow.Append(entry, now); err != nil {
+		return domain.Workflow{}, err
+	}
+	s.workflows[id] = workflow
+	s.pipelineAutoRestarts = append(s.pipelineAutoRestarts, memoryPipelineAutoRestart{gateKind: gateKind, reasons: reasons, revision: workflow.Revision})
+	return workflow, nil
+}
+
+type memoryPipelineAutoRestart struct {
+	gateKind string
+	reasons  []string
+	revision int64
 }
 
 type memoryAdminTransition struct {

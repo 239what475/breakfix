@@ -196,6 +196,77 @@ func (d *DocumentPracticeRepository) RestartWorkflow(ctx context.Context, workfl
 	}, "admin.restart")
 }
 
+// AutoRestartWorkflow re-drives a gate-rejected workflow to Planning as a
+// pipeline decision: the same RestartAt transition and revision advance an
+// administrator's restart performs, fenced by the state version the rejection
+// produced. The system ledger entry carries the gate and its rejection
+// reasons; no human action audit row is written because no human operated.
+func (d *DocumentPracticeRepository) AutoRestartWorkflow(ctx context.Context, workflowID, gateKind string, reasons []string, expectedStateVersion int64, now time.Time) (domain.Workflow, error) {
+	if strings.TrimSpace(workflowID) == "" || strings.TrimSpace(gateKind) == "" || len(reasons) == 0 || expectedStateVersion < 1 || now.IsZero() {
+		return domain.Workflow{}, errors.New("pipeline auto restart is invalid")
+	}
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Workflow{}, fmt.Errorf("begin pipeline auto restart: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	workflow, err := scanDocumentWorkflow(tx.QueryRowContext(ctx, `SELECT id, state, state_version, revision, max_revisions, updated_at FROM document_workflows WHERE id = ? FOR UPDATE`, workflowID))
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	if workflow.StateVersion != expectedStateVersion {
+		return domain.Workflow{}, fmt.Errorf("%w (workflow moved to %s v%d)", domain.ErrWorkflowConflict, workflow.State, workflow.StateVersion)
+	}
+	fromState := workflow.State
+	if err := workflow.RestartAt(now); err != nil {
+		return domain.Workflow{}, fmt.Errorf("%w (%s)", domain.ErrWorkflowConflict, err.Error())
+	}
+	payload, err := json.Marshal(struct {
+		System    string    `json:"system"`
+		FromState string    `json:"from_state"`
+		Gate      string    `json:"gate"`
+		Reasons   []string  `json:"reasons"`
+		At        time.Time `json:"at"`
+	}{System: "documentation-pipeline", FromState: string(fromState), Gate: gateKind, Reasons: reasons, At: now.UTC()})
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	digest, err := domain.DigestAgentInput(struct {
+		System    string    `json:"system"`
+		FromState string    `json:"from_state"`
+		Gate      string    `json:"gate"`
+		Reasons   []string  `json:"reasons"`
+		At        time.Time `json:"at"`
+	}{System: "documentation-pipeline", FromState: string(fromState), Gate: gateKind, Reasons: reasons, At: now.UTC()})
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	artifact := domain.ArtifactRecord{
+		ID:              "pipeline.auto_restart-" + workflowID + "-v" + strconv.FormatInt(workflow.StateVersion, 10),
+		Kind:            "pipeline.auto_restart",
+		ContentRevision: strconv.FormatInt(workflow.Revision, 10),
+		Digest:          digest,
+		SchemaVersion:   domain.FormatVersion,
+		OwnerRole:       "system",
+		CreatedAt:       now.UTC(),
+		Payload:         payload,
+	}
+	if err := insertImmutableDocumentArtifact(ctx, tx, workflowID, artifact); err != nil {
+		return domain.Workflow{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE document_workflows SET state = ?, state_version = ?, revision = ?, updated_at = ? WHERE id = ? AND state_version = ?`, workflow.State, workflow.StateVersion, workflow.Revision, workflow.UpdatedAt, workflowID, expectedStateVersion)
+	if err != nil {
+		return domain.Workflow{}, err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return domain.Workflow{}, errors.New("pipeline auto restart lost its fence")
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Workflow{}, err
+	}
+	return workflow, nil
+}
+
 // adminWorkflowTransition is the shared force-fail/restart implementation. The
 // state fence, the ledger entry, and the human audit commit together: a lost
 // race or rejected transition leaves no trace in either record.

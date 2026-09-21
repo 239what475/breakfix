@@ -500,6 +500,70 @@ func TestForceFailAndRestartIgnoreTheMaxRevisionsCap(t *testing.T) {
 	}
 }
 
+func TestAutoRestartWorkflowReDrivesGateRejectionsAsASystemDecision(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	stuckAt := time.Now().UTC().Add(-time.Hour)
+	workflow := seedWorkflowInState(t, database, "document-workflow-auto-restart", domain.ArtifactReviewing, stuckAt)
+	now := time.Now().UTC()
+	// Land the workflow in the Rejected state a candidate gate produces.
+	rejected := workflow
+	if err := rejected.AdvanceAt(domain.Rejected, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.conn.ExecContext(ctx, `UPDATE document_workflows SET state = ?, state_version = ? WHERE id = ?`, rejected.State, rejected.StateVersion, workflow.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	reasons := []string{"safety: rejected", "assertion writes outside the read-only boundary"}
+	restarted, err := database.DocumentPractice.AutoRestartWorkflow(ctx, workflow.ID, "artifact-gate", reasons, rejected.StateVersion, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("auto restart: %v", err)
+	}
+	if restarted.State != domain.Planning || restarted.Revision != workflow.Revision+1 || restarted.StateVersion != rejected.StateVersion+1 {
+		t.Fatalf("auto restarted workflow = %#v", restarted)
+	}
+	artifacts, err := database.DocumentPractice.ListArtifacts(ctx, workflow.ID)
+	if err != nil || len(artifacts) != 1 {
+		t.Fatalf("ledger after auto restart = %#v, %v", artifacts, err)
+	}
+	entry := artifacts[0]
+	if entry.Kind != "pipeline.auto_restart" || entry.OwnerRole != "system" {
+		t.Fatalf("auto restart ledger entry = %#v", entry)
+	}
+	var payload struct {
+		System    string    `json:"system"`
+		FromState string    `json:"from_state"`
+		Gate      string    `json:"gate"`
+		Reasons   []string  `json:"reasons"`
+		At        time.Time `json:"at"`
+	}
+	if err := json.Unmarshal(entry.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.System != "documentation-pipeline" || payload.FromState != string(domain.Rejected) || payload.Gate != "artifact-gate" || len(payload.Reasons) != 2 {
+		t.Fatalf("auto restart payload = %#v", payload)
+	}
+	// The pipeline restart writes no human action: no human operated.
+	if rows, err := database.Audit.ListHumanActions(ctx, HumanActionFilter{Limit: 10}); err != nil || len(rows) != 0 {
+		t.Fatalf("auto restart human action rows = %#v, %v", rows, err)
+	}
+
+	// A lost fence (the workflow moved after the caller read it) conflicts.
+	if _, err := database.DocumentPractice.AutoRestartWorkflow(ctx, workflow.ID, "artifact-gate", reasons, rejected.StateVersion, now.Add(2*time.Second)); !errors.Is(err, domain.ErrWorkflowConflict) {
+		t.Fatalf("stale auto restart = %v, want conflict", err)
+	}
+	// A non-rejected workflow conflicts: the restart transition itself refuses.
+	fresh := seedWorkflowInState(t, database, "document-workflow-auto-restart-live", domain.Generating, now.Add(-time.Minute))
+	live, err := database.DocumentPractice.GetWorkflow(ctx, fresh.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.DocumentPractice.AutoRestartWorkflow(ctx, fresh.ID, "plan-gate", reasons, live.StateVersion, now); !errors.Is(err, domain.ErrWorkflowConflict) {
+		t.Fatalf("auto restart from %s = %v, want conflict", live.State, err)
+	}
+}
+
 func TestWorkflowObservationJoinsTheBoundActionStatus(t *testing.T) {
 	database := newTestDB(t)
 	ctx := context.Background()

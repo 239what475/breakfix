@@ -314,9 +314,15 @@ type GateResult struct {
 	ArtifactID     string         `json:"artifact_id"`
 	ArtifactDigest string         `json:"artifact_digest"`
 	Decision       ReviewDecision `json:"decision"`
-	Reasons        []string       `json:"reasons,omitempty"`
-	PolicyVersion  string         `json:"policy_version"`
-	CreatedAt      time.Time      `json:"created_at"`
+	// HardReject records that at least one reviewer opinion carried the
+	// hard-reject flag. A hard rejection never re-enters the automatic retry
+	// budget: it is the deterministic-error terminal, reserved for the
+	// administrator's rescue verbs. Omitempty keeps ledger rows written before
+	// the field existed semantically equal to freshly stamped results.
+	HardReject    bool      `json:"hard_reject,omitempty"`
+	Reasons       []string  `json:"reasons,omitempty"`
+	PolicyVersion string    `json:"policy_version"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 func (g GateResult) Approved() bool { return g.Decision == ReviewApprove }

@@ -95,6 +95,12 @@ type PipelineStartResult struct {
 // The administrative ignition action, when supplied, is recorded together
 // with the workflow creation. The library metadata supplies the page identity
 // persisted alongside the workflow for corpus aggregation.
+//
+// A gate rejection is not terminal while the automatic retry budget lasts:
+// the pipeline internally restarts the workflow (the same RestartAt machinery
+// an administrator triggers, recorded as a system decision) and re-runs the
+// chain in this same invocation. Hard rejections and exhausted budgets keep
+// the Rejected terminal for the administrator's rescue verbs.
 func (p *AgentPipeline) Start(ctx context.Context, workflowID, pagePath, anchor string, ignition *audit.HumanAction) (PipelineStartResult, error) {
 	metadata, err := p.reader.ReadMetadata(pagePath)
 	if err != nil {
@@ -123,56 +129,91 @@ func (p *AgentPipeline) Start(ctx context.Context, workflowID, pagePath, anchor 
 	if err != nil {
 		return PipelineStartResult{}, err
 	}
+	for {
+		result, rejection, err := p.attempt(ctx, workflow, page, metadata, evidence, input, pagePath, anchor)
+		if err != nil || rejection == nil {
+			return result, err
+		}
+		restarted, retry, err := p.service.AutoRestart(ctx, rejection.workflow.ID, rejection.gateKind, rejection.gate, rejection.workflow)
+		if err != nil {
+			return PipelineStartResult{}, err
+		}
+		if !retry && restarted.State != domain.Planning {
+			// A hard rejection, an exhausted budget, or an administrator who
+			// won the race and resolved the workflow differently: the durable
+			// state is the answer.
+			return PipelineStartResult{Workflow: restarted}, nil
+		}
+		// The restarted attempt re-plans into fresh, attempt-namespaced ledger
+		// entries; revision strictly advances per restart, so the loop is
+		// bounded by max_revisions.
+		workflow = restarted
+	}
+}
+
+// gateRejection is a gate refusal that may still re-enter the retry budget.
+type gateRejection struct {
+	gateKind string
+	gate     domain.GateResult
+	workflow domain.Workflow
+}
+
+// attempt runs one full Agent chain from Planning. It returns either the
+// chain's outcome or the gate rejection that ended it, never both.
+func (p *AgentPipeline) attempt(ctx context.Context, workflow domain.Workflow, page domain.Page, metadata domain.Metadata, evidence []domain.EvidenceReference, input AgentInput, pagePath, anchor string) (PipelineStartResult, *gateRejection, error) {
 	plannerRun, err := p.newRunID("planner")
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
 	plan, err := p.proposePlan(ctx, page, metadata, evidence)
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
 	if err := validatePlannedPage(plan, page, pagePath, anchor); err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
 	plannerAudit, err := p.audit(plannerRun, "planner", input, plan)
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
 	workflow, planArtifact, err := p.service.SubmitPlan(ctx, workflow.ID, plan, plannerAudit)
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
 	planOpinions, planAudits, err := p.reviewPlan(ctx, plan)
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
 	bundle := ReviewBundle{ArtifactID: planArtifact.ID, ArtifactDigest: planArtifact.Digest, Opinions: planOpinions, CreatedAt: p.now()}
 	workflow, planGate, err := p.service.GatePlan(ctx, workflow.ID, plannerRun, planArtifact, bundle, planAudits)
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
-	if workflow.State == domain.NoPractice || workflow.State == domain.Rejected {
-		return PipelineStartResult{Workflow: workflow}, nil
+	if workflow.State == domain.NoPractice {
+		return PipelineStartResult{Workflow: workflow}, nil, nil
+	}
+	if workflow.State == domain.Rejected {
+		return PipelineStartResult{}, &gateRejection{gateKind: "plan-gate", gate: planGate, workflow: workflow}, nil
 	}
 	if !planGate.Approved() || workflow.State != domain.Generating {
-		return PipelineStartResult{}, errors.New("documentation plan did not reach generation")
+		return PipelineStartResult{}, nil, errors.New("documentation plan did not reach generation")
 	}
 	profile, err := p.profiles.ResolveDocumentationRuntimeProfile(plan.Runtime)
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
 	generatorRun, err := p.newRunID("generator")
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
 	lifecycle := p.profiles.DocumentationLifecyclePolicy()
 	blueprint, err := p.generator.Generate(ctx, plan, profile, lifecycle)
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
 	candidate, archive, err := CompileCandidate(plan, profile, lifecycle, blueprint, p.now())
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
 	generatorAudit, err := p.audit(generatorRun, "generator", struct {
 		Plan      domain.LearningUnitPlan `json:"plan"`
@@ -180,33 +221,36 @@ func (p *AgentPipeline) Start(ctx context.Context, workflowID, pagePath, anchor 
 		Blueprint CandidateBlueprint      `json:"blueprint"`
 	}{Plan: plan, Profile: profile, Blueprint: blueprint}, candidate)
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
 	workflow, candidateArtifact, err := p.service.SubmitCandidate(ctx, workflow.ID, plan, candidate, archive, generatorAudit)
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
 	opinions, audits, err := p.reviewCandidate(ctx, plan, candidate, blueprint.Files)
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
 	specDigest, err := candidate.Spec.Digest()
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
 	candidateBundle := ArtifactReviewBundle{CandidateID: candidate.ID, CandidateDigest: candidate.Source.Digest, SpecDigest: specDigest, PlanID: plan.ID, PlanRevision: plan.Revision, Opinions: opinions, CreatedAt: p.now()}
 	workflow, artifactGate, err := p.service.GateCandidate(ctx, workflow.ID, generatorRun, plan, candidate, candidateArtifact, candidateBundle, audits)
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
+	}
+	if workflow.State == domain.Rejected {
+		return PipelineStartResult{}, &gateRejection{gateKind: "artifact-gate", gate: artifactGate, workflow: workflow}, nil
 	}
 	if !artifactGate.Approved() || workflow.State != domain.MaterializingArtifact {
-		return PipelineStartResult{Workflow: workflow}, nil
+		return PipelineStartResult{Workflow: workflow}, nil, nil
 	}
 	action, err := p.service.ScheduleMaterialization(ctx, workflow.ID, candidate, archive)
 	if err != nil {
-		return PipelineStartResult{}, err
+		return PipelineStartResult{}, nil, err
 	}
-	return PipelineStartResult{Workflow: workflow, MaterializationAction: action}, nil
+	return PipelineStartResult{Workflow: workflow, MaterializationAction: action}, nil, nil
 }
 
 func (p *AgentPipeline) proposePlan(ctx context.Context, page domain.Page, metadata domain.Metadata, evidence []domain.EvidenceReference) (domain.LearningUnitPlan, error) {

@@ -3,6 +3,7 @@ package documentpractice
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -359,5 +360,216 @@ func TestLateOrStaleCompletionIsAcknowledgedWithoutAdvancing(t *testing.T) {
 	}
 	if !store.actions[stale.Key()].reconciled {
 		t.Fatalf("stale completion binding was not marked reconciled")
+	}
+}
+
+// rejectingReviewer soft-rejects its first rejections reviews with concrete
+// reasons - the shape a live evidence reviewer produces - then approves. With
+// hard set, its rejections carry the hard-reject flag instead.
+type rejectingReviewer struct {
+	role       string
+	rejections int
+	hard       bool
+	reasons    []string
+}
+
+func (r *rejectingReviewer) ReviewPlan(_ context.Context, runID string, _ domain.LearningUnitPlan) (domain.ReviewOpinion, error) {
+	return r.opinion(runID), nil
+}
+
+func (r *rejectingReviewer) ReviewCandidate(_ context.Context, runID string, _ domain.LearningUnitPlan, _ domain.PracticeCandidate, _ []GeneratedFile) (domain.ReviewOpinion, error) {
+	return r.opinion(runID), nil
+}
+
+func (r *rejectingReviewer) opinion(runID string) domain.ReviewOpinion {
+	if r.rejections > 0 {
+		r.rejections--
+		return domain.ReviewOpinion{ReviewerID: runID, Role: r.role, Decision: domain.ReviewReject, HardReject: r.hard, Reasons: r.reasons, PolicyVersion: "policy-v1"}
+	}
+	return domain.ReviewOpinion{ReviewerID: runID, Role: r.role, Decision: domain.ReviewApprove, PolicyVersion: "policy-v1"}
+}
+
+// newRetryPipeline assembles the full publication chain with injectable
+// reviewers so a test can reject a bounded number of attempts.
+func newRetryPipeline(t *testing.T, now time.Time, planReviewers []PlanReviewRole, artifactReviewers []CandidateReviewRole) (*AgentPipeline, *memoryDocumentStore, domain.Page) {
+	t.Helper()
+	plan := validPlan()
+	plan.CreatedAt = now
+	page := domain.Page{Context: plan.Context, Path: plan.Context.PagePath, Digest: plan.Evidence[0].Digest, Content: "# Pod lifecycle"}
+	seed := serviceCandidate(t, plan, []byte("seed archive"), now)
+	blueprint := pipelineBlueprint(plan, seed)
+	compiled, _, err := CompileCandidate(plan, seed.Spec.RuntimeProfile, seed.Spec.LifecyclePolicy, blueprint, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision, report := serviceRevisionAndReport(t, compiled, now, true)
+	store := newMemoryDocumentStore()
+	service, err := NewService(store, &memoryRunnableStore{revision: revision, report: report})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return now }
+	pipeline, err := NewAgentPipeline(service, fakePlannerReader{page: page, metadata: domain.Metadata{Context: plan.Context, Path: page.Path, Title: plan.Title, Anchors: []string{"pod-lifecycle"}}}, fakePlanAgent{plan: plan}, planReviewers, pipelineGenerator{blueprint: blueprint}, artifactReviewers, []VerificationReviewRole{pipelineReviewer{role: "verification"}}, pipelineProfiles{profile: seed.Spec.RuntimeProfile}, AgentPipelineConfig{Model: "test-model", PromptVersion: "prompt-v1", ToolVersion: "tool-v1", PolicyVersion: "policy-v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeline.now = func() time.Time { return now }
+	pipeline.newRunID = sequentialRunIDs()
+	return pipeline, store, page
+}
+
+func countLedgerKinds(workflow domain.Workflow) map[string]int {
+	kinds := map[string]int{}
+	for _, artifact := range workflow.Artifacts {
+		kinds[artifact.Kind]++
+	}
+	return kinds
+}
+
+func TestAgentPipelineAutoRestartsPlanGateRejectionAndRetriesToMaterialization(t *testing.T) {
+	now := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
+	pipeline, store, page := newRetryPipeline(t, now,
+		[]PlanReviewRole{
+			&rejectingReviewer{role: "evidence", rejections: 1, reasons: []string{"startup recreates the observed file on every boot; the disappearance assertion can never hold"}},
+			pipelineReviewer{role: "value"},
+		},
+		[]CandidateReviewRole{pipelineReviewer{role: "safety"}, pipelineReviewer{role: "consistency"}})
+
+	started, err := pipeline.Start(context.Background(), "agent-pipeline-plan-retry", page.Path, "", nil)
+	if err != nil || started.Workflow.State != domain.MaterializingArtifact || started.Workflow.Revision != 2 {
+		t.Fatalf("retrying start = %#v, %v", started.Workflow, err)
+	}
+	entries, err := store.GetWorkflow(context.Background(), started.Workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := countLedgerKinds(entries)
+	// Each attempt lands in independent, attempt-namespaced ledger entries.
+	if kinds["learning-unit-plan"] != 2 || kinds["plan-gate"] != 2 || kinds["pipeline.auto_restart"] != 1 {
+		t.Fatalf("retry ledger kinds = %#v", kinds)
+	}
+	planArtifacts := []string{}
+	for _, artifact := range entries.Artifacts {
+		if artifact.Kind == "learning-unit-plan" {
+			planArtifacts = append(planArtifacts, artifact.ID)
+		}
+	}
+	if !strings.HasSuffix(planArtifacts[0], "-a1") || !strings.HasSuffix(planArtifacts[1], "-a2") {
+		t.Fatalf("plan artifacts are not attempt-namespaced: %#v", planArtifacts)
+	}
+	if len(store.pipelineAutoRestarts) != 1 || store.pipelineAutoRestarts[0].gateKind != "plan-gate" || len(store.pipelineAutoRestarts[0].reasons) == 0 {
+		t.Fatalf("auto restarts = %#v", store.pipelineAutoRestarts)
+	}
+	// The internal restart is a pipeline decision, not an administrator's.
+	if len(store.humanActions) != 0 {
+		t.Fatalf("auto restart recorded a human action: %#v", store.humanActions)
+	}
+	gates := []domain.GateResult{}
+	for _, artifact := range entries.Artifacts {
+		if artifact.Kind == "plan-gate" {
+			var gate domain.GateResult
+			if err := json.Unmarshal(artifact.Payload, &gate); err != nil {
+				t.Fatal(err)
+			}
+			gates = append(gates, gate)
+		}
+	}
+	if gates[0].Approved() || len(gates[0].Reasons) == 0 || !gates[1].Approved() {
+		t.Fatalf("gate outcomes = %#v", gates)
+	}
+}
+
+func TestAgentPipelineAutoRestartsCandidateGateRejectionAndRetriesToMaterialization(t *testing.T) {
+	now := time.Date(2026, 9, 21, 11, 0, 0, 0, time.UTC)
+	pipeline, store, page := newRetryPipeline(t, now,
+		[]PlanReviewRole{pipelineReviewer{role: "evidence"}, pipelineReviewer{role: "value"}},
+		[]CandidateReviewRole{
+			&rejectingReviewer{role: "safety", rejections: 1, reasons: []string{"assertion writes outside the read-only boundary"}},
+			pipelineReviewer{role: "consistency"},
+		})
+
+	started, err := pipeline.Start(context.Background(), "agent-pipeline-candidate-retry", page.Path, "", nil)
+	if err != nil || started.Workflow.State != domain.MaterializingArtifact || started.Workflow.Revision != 2 {
+		t.Fatalf("retrying start = %#v, %v", started.Workflow, err)
+	}
+	entries, err := store.GetWorkflow(context.Background(), started.Workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := countLedgerKinds(entries)
+	if kinds["practice-candidate"] != 2 || kinds["artifact-gate"] != 2 || kinds["pipeline.auto_restart"] != 1 {
+		t.Fatalf("retry ledger kinds = %#v", kinds)
+	}
+	if len(store.pipelineAutoRestarts) != 1 || store.pipelineAutoRestarts[0].gateKind != "artifact-gate" {
+		t.Fatalf("auto restarts = %#v", store.pipelineAutoRestarts)
+	}
+}
+
+func TestAgentPipelineGateRejectionExhaustsRetryBudgetIntoTerminalRejected(t *testing.T) {
+	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	pipeline, store, page := newRetryPipeline(t, now,
+		[]PlanReviewRole{
+			&rejectingReviewer{role: "evidence", rejections: 100, reasons: []string{"observation remains ungrounded"}},
+			pipelineReviewer{role: "value"},
+		},
+		[]CandidateReviewRole{pipelineReviewer{role: "safety"}, pipelineReviewer{role: "consistency"}})
+
+	// Default budget: revision starts at 1 with max_revisions 3, so the chain
+	// runs three attempts (two automatic restarts) before the third rejection
+	// lands in the terminal the administrator rescues.
+	started, err := pipeline.Start(context.Background(), "agent-pipeline-budget", page.Path, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.Workflow.State != domain.Rejected || started.Workflow.Revision != 3 {
+		t.Fatalf("exhausted start = %#v", started.Workflow)
+	}
+	entries, err := store.GetWorkflow(context.Background(), started.Workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := countLedgerKinds(entries)
+	if kinds["learning-unit-plan"] != 3 || kinds["plan-gate"] != 3 || kinds["pipeline.auto_restart"] != 2 {
+		t.Fatalf("exhausted ledger kinds = %#v", kinds)
+	}
+	if !entries.State.Terminal() {
+		t.Fatalf("exhausted workflow is not terminal: %s", entries.State)
+	}
+}
+
+func TestAgentPipelineHardGateRejectionNeverAutoRestarts(t *testing.T) {
+	now := time.Date(2026, 9, 21, 13, 0, 0, 0, time.UTC)
+	pipeline, store, page := newRetryPipeline(t, now,
+		[]PlanReviewRole{
+			&rejectingReviewer{role: "evidence", rejections: 1, hard: true, reasons: []string{"fabricated evidence reference"}},
+			pipelineReviewer{role: "value"},
+		},
+		[]CandidateReviewRole{pipelineReviewer{role: "safety"}, pipelineReviewer{role: "consistency"}})
+
+	started, err := pipeline.Start(context.Background(), "agent-pipeline-hard-reject", page.Path, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.Workflow.State != domain.Rejected || started.Workflow.Revision != 1 {
+		t.Fatalf("hard-rejected start = %#v", started.Workflow)
+	}
+	entries, err := store.GetWorkflow(context.Background(), started.Workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kinds := countLedgerKinds(entries); kinds["pipeline.auto_restart"] != 0 {
+		t.Fatalf("hard rejection auto restarted: %#v", kinds)
+	}
+	for _, artifact := range entries.Artifacts {
+		if artifact.Kind != "plan-gate" {
+			continue
+		}
+		var gate domain.GateResult
+		if err := json.Unmarshal(artifact.Payload, &gate); err != nil {
+			t.Fatal(err)
+		}
+		if !gate.HardReject {
+			t.Fatalf("gate result lost the hard-reject flag: %#v", gate)
+		}
 	}
 }

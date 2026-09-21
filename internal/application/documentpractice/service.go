@@ -35,6 +35,12 @@ type Store interface {
 	// action audit in one transaction.
 	ForceFailWorkflow(context.Context, string, string, *audit.HumanAction, time.Time) (domain.Workflow, error)
 	RestartWorkflow(context.Context, string, string, *audit.HumanAction, time.Time) (domain.Workflow, error)
+	// AutoRestartWorkflow re-drives a just-rejected workflow as a pipeline
+	// decision: the same RestartAt transition an administrator triggers, fenced
+	// by the state version the rejection produced. The system ledger entry
+	// carries the gate and its rejection reasons; no human action row is
+	// written because no human operated.
+	AutoRestartWorkflow(context.Context, string, string, []string, int64, time.Time) (domain.Workflow, error)
 	// ListWorkflowWatchdogCandidates returns every non-terminal workflow whose
 	// bound public runnable action already failed or exhausted its attempts.
 	ListWorkflowWatchdogCandidates(context.Context, time.Time) ([]WatchdogCandidate, error)
@@ -537,6 +543,34 @@ func (s *Service) ForceFail(ctx context.Context, workflowID, reason string, acti
 // performs the Agent work, so restart and ignition stay separate verbs.
 func (s *Service) Restart(ctx context.Context, workflowID, reason string, action *audit.HumanAction) (domain.Workflow, error) {
 	return s.store.RestartWorkflow(ctx, workflowID, reason, action, s.now())
+}
+
+// AutoRestart re-drives a gate-rejected workflow as a pipeline decision,
+// mirroring the operations side's rejected-with-feedback loop. The attempt
+// budget is bounded by MaxRevisions: revision counts attempts, so an automatic
+// restart is granted only while revision < max_revisions (three attempts under
+// the default). A hard rejection - a reviewer flagged deterministic, unfixable
+// content - never re-enters the budget; it stays Rejected for the
+// administrator's rescue verbs, exactly as an exhausted budget does.
+func (s *Service) AutoRestart(ctx context.Context, workflowID, gateKind string, gate domain.GateResult, rejected domain.Workflow) (domain.Workflow, bool, error) {
+	if gate.HardReject || rejected.Revision >= rejected.MaxRevisions {
+		return rejected, false, nil
+	}
+	restarted, err := s.store.AutoRestartWorkflow(ctx, workflowID, gateKind, gate.Reasons, rejected.StateVersion, s.now())
+	if errors.Is(err, domain.ErrWorkflowConflict) {
+		// A lost fence means someone else moved the workflow first (typically an
+		// administrator restarting the same rejection). The durable state is the
+		// truth; the caller decides from it.
+		current, getErr := s.store.GetWorkflow(ctx, workflowID)
+		if getErr != nil {
+			return domain.Workflow{}, false, err
+		}
+		return current, false, nil
+	}
+	if err != nil {
+		return domain.Workflow{}, false, err
+	}
+	return restarted, true, nil
 }
 
 // readyFor permits an exact replay only after the expected artifact is already
