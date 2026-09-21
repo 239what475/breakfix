@@ -177,6 +177,7 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 		}
 		h.ListAdminRunnableActions(c, params)
 	})
+	adminRoutes.GET("/runnable-reaps", h.ListAdminRunnableReaps)
 	adminRoutes.GET("/audit", func(c *gin.Context) {
 		params := api.ListAdminAuditParams{}
 		if raw := c.Query("limit"); raw != "" {

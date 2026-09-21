@@ -979,7 +979,7 @@ type RunnableActionObservation struct {
 func (d *RunnableRepository) ListRunnableActionObservations(ctx context.Context, state, phase string) ([]RunnableActionObservation, error) {
 	query := `SELECT action_key, content_kind, content_id, content_revision, phase, state, attempt,
 		lease_expires_at, next_run_at, failure_class, failure_code, failure_summary, created_at
-		FROM runnable_actions`
+		FROM runnable_actions a`
 	conditions := make([]string, 0, 2)
 	args := make([]any, 0, 2)
 	if state != "" {
@@ -1004,6 +1004,40 @@ func (d *RunnableRepository) ListRunnableActionObservations(ctx context.Context,
 		var observation RunnableActionObservation
 		if err := rows.Scan(&observation.ActionKey, &observation.ContentKind, &observation.ContentID, &observation.ContentRevision, &observation.Phase, &observation.State, &observation.Attempt,
 			&observation.LeaseExpiresAt, &observation.NextRunAt, &observation.FailureClass, &observation.FailureCode, &observation.FailureSummary, &observation.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, observation)
+	}
+	return result, rows.Err()
+}
+
+// RunnableReapObservation is the admin reap-queue read model.
+type RunnableReapObservation struct {
+	ReapKey       string
+	State         runnable.ReapState
+	Attempt       int64
+	NextAttemptAt time.Time
+	LastError     string
+	UpdatedAt     time.Time
+}
+
+// ListRunnableReapObservations lists the reap queue newest-first. Reaps are an
+// operator-facing symptom surface, not an audit log: succeeded rows stay
+// readable, and the caller caps the read.
+func (d *RunnableRepository) ListRunnableReapObservations(ctx context.Context, limit int) ([]RunnableReapObservation, error) {
+	if limit <= 0 {
+		return nil, errors.New("runnable reap observation limit is invalid")
+	}
+	rows, err := d.conn.QueryContext(ctx, `SELECT reap_key, state, attempt, next_attempt_at, last_error, updated_at
+		FROM runnable_reaps ORDER BY updated_at DESC, reap_key LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list runnable reap observations: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	result := []RunnableReapObservation{}
+	for rows.Next() {
+		var observation RunnableReapObservation
+		if err := rows.Scan(&observation.ReapKey, &observation.State, &observation.Attempt, &observation.NextAttemptAt, &observation.LastError, &observation.UpdatedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, observation)

@@ -313,8 +313,10 @@ func TestRunnableQueueObservationCountsFlagsAndFilters(t *testing.T) {
 			attemptHigh++
 		}
 	}
-	if attemptHigh != 2 {
-		t.Fatalf("attempt-high observations = %d, want 2", attemptHigh)
+	// Only the hand-inserted running action sits at the flag boundary: the
+	// scheduled actions start at attempt 0 and the failed one at 2.
+	if attemptHigh != 1 {
+		t.Fatalf("attempt-high observations = %d, want 1", attemptHigh)
 	}
 	filtered, err := database.Runnable.ListRunnableActionObservations(ctx, "failed", "verify")
 	if err != nil || len(filtered) != 1 || filtered[0].ActionKey != failed.Key() {

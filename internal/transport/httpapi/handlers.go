@@ -46,6 +46,7 @@ type Handler struct {
 	serverInstance       string
 	allowRegistration    bool
 	agentStuckAfter      time.Duration
+	playgroundMaxActive  int
 	runtimeConfig        config.RuntimeConfig
 	incusConfig          incus.Config
 	nodeTerminal         NodeTerminalProvider
@@ -102,6 +103,10 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 	if err != nil {
 		return nil, err
 	}
+	playgroundMaxActive, err := cfg.PlaygroundMaxActive()
+	if err != nil {
+		return nil, err
+	}
 	catalogService := dependencies.Catalog
 	if catalogService == nil {
 		var lifecycle appcatalog.ScenarioLifecycleStore
@@ -149,6 +154,7 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		serverInstance:       newServerInstanceID(),
 		allowRegistration:    cfg.AllowRegistration,
 		agentStuckAfter:      agentStuckAfter,
+		playgroundMaxActive:  playgroundMaxActive,
 		runtimeConfig:        cfg.Runtime,
 		incusConfig:          cfg.Incus,
 		nodeTerminal:         dependencies.NodeTerminal,

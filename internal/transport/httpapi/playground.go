@@ -121,6 +121,37 @@ func (h *Handler) GetPlayground(c *gin.Context) {
 	c.JSON(http.StatusOK, playgroundResponse(env))
 }
 
+// playgroundAtCapacity reports whether the site-wide playground fleet already
+// holds the configured number of active sessions. The counting口径 matches
+// findPlaygroundEnvironment — content-kind label, no content identity, live
+// phase, not deleting — so everything the ball would call "a session" occupies
+// capacity, including Draining environments whose resources the Reaper has not
+// reclaimed yet. The gate is deliberately soft: it reads one list without a
+// lock, so concurrent creates may briefly overshoot; the TTLs stay the hard
+// bound on fleet size.
+func (h *Handler) playgroundAtCapacity(ctx context.Context) (bool, error) {
+	selector := fmt.Sprintf("breakfix.dev/content-kind=%s", environmentContentPlayground)
+	items, err := h.k8s.ListRuntimeEnvironments(ctx, h.crdNamespace, selector)
+	if err != nil {
+		return false, err
+	}
+	active := 0
+	for index := range items.Items {
+		environment := &items.Items[index]
+		if environment.DeletionTimestamp != nil {
+			continue
+		}
+		if environment.Spec.BlankRuntime == nil ||
+			environment.Labels["breakfix.dev/content-id"] != "" ||
+			environment.Labels["breakfix.dev/content-revision"] != "" ||
+			!isLiveEnvironmentPhase(environment.Status.Phase) {
+			continue
+		}
+		active++
+	}
+	return active >= h.playgroundMaxActive, nil
+}
+
 // StartPlayground creates or adopts the user's playground. Creation returns
 // as soon as the environment is named; readiness arrives through polling,
 // never through a blocking request.
@@ -157,6 +188,19 @@ func (h *Handler) StartPlayground(c *gin.Context) {
 		}
 	}
 	if env == nil {
+		// The capacity gate sits on the creation path only: adopting or
+		// resuming an existing session, polling, reset, and close are never
+		// blocked, and a user whose own drained environment was just cleared
+		// above recreates against the reclaimed count.
+		atCapacity, capacityErr := h.playgroundAtCapacity(c.Request.Context())
+		if capacityErr != nil {
+			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("count playground fleet: %v", capacityErr)})
+			return
+		}
+		if atCapacity {
+			c.JSON(http.StatusTooManyRequests, api.ErrorResponse{Error: "playground is at capacity"})
+			return
+		}
 		env, err = h.adoptOrCreatePlayground(c.Request.Context(), user, target)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: fmt.Sprintf("start playground: %v", err)})

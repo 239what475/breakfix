@@ -131,6 +131,8 @@ paths:
                 $ref: "#/components/schemas/PlaygroundEnvironment"
         "401":
           $ref: "#/components/responses/Error"
+        "429":
+          description: The site-wide active playground fleet is at the configured capacity; retry after a session closes
     delete:
       operationId: closePlayground
       summary: Close the playground and release its resources (JWT)
@@ -362,6 +364,26 @@ paths:
                 $ref: "#/components/schemas/AdminRunnableActionPage"
         "400":
           $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+
+  /admin/runnable-reaps:
+    get:
+      operationId: listAdminRunnableReaps
+      summary: Observe the durable reap queue behind environment teardown (admin only)
+      description: Reap rows newest first, capped at 100; state/attempt/last_error expose stuck teardowns without database access.
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Reap queue observations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRunnableReapList"
         "401":
           $ref: "#/components/responses/Error"
         "403":
@@ -1505,6 +1527,35 @@ components:
           items:
             $ref: "#/components/schemas/AdminRunnableActionItem"
 
+    AdminRunnableReap:
+      type: object
+      required: [reap_key, state, attempt, last_error, next_attempt_at, updated_at]
+      properties:
+        reap_key:
+          type: string
+        state:
+          type: string
+          enum: [queued, claimed, succeeded]
+        attempt:
+          type: integer
+        last_error:
+          type: string
+        next_attempt_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AdminRunnableReapList:
+      type: object
+      required: [reaps]
+      properties:
+        reaps:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminRunnableReap"
+
     AdminEnvironment:
       type: object
       required: [name, namespace, phase, purpose, created_at]
@@ -1732,10 +1783,14 @@ components:
 
     MySpaceActiveEnvironment:
       type: object
-      required: [environment_id, scenario, runtime, phase, checkpoint_progress]
+      required: [environment_id, kind, runtime, phase]
       properties:
         environment_id:
           type: string
+        kind:
+          type: string
+          enum: [playground, operations]
+          description: playground entries carry no scenario identity or checkpoint progress
         scenario:
           $ref: "#/components/schemas/MySpaceScenario"
         runtime:

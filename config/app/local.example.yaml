@@ -76,6 +76,11 @@ agent:
 # Optional Server-wide retention policy. Empty means the built-in 24h default.
 generator_workspace_idle_ttl: ${GENERATOR_WORKSPACE_IDLE_TTL}
 
+# Site-wide cap on concurrently active playground environments. The gate only
+# rejects new sessions; empty keeps the built-in default of 10.
+playground:
+  max_active: "10"
+
 # Generator workspaces are Server-owned BYO PVCs mounted by OpenSandbox. The
 # lifecycle API key is only present in the Server process, never a Runtime Worker.
 # Each GenerationWorkflow owns one current workspace and reuses it across

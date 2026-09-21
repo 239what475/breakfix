@@ -89,6 +89,32 @@ func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimi
 	}
 	active := make([]api.MySpaceActiveEnvironment, 0, len(environments))
 	for _, env := range environments {
+		// The playground binds the user alone: it shows as its own kind with a
+		// state badge and expiry but no scenario identity or checkpoint
+		// progress. Provisioning sessions are already visible — the same live
+		// phases the floating ball polls.
+		if env.Blank && env.ScenarioRef == "" && env.SourceRevision == "" {
+			if !isLiveEnvironmentPhase(env.Phase) {
+				continue
+			}
+			runtimeName := env.Runtime
+			if runtimeName == "" {
+				runtimeName = playgroundProvider
+			}
+			var expiresAt *time.Time
+			if env.ExpiresAt != nil {
+				expires := env.ExpiresAt.UTC()
+				expiresAt = &expires
+			}
+			active = append(active, api.MySpaceActiveEnvironment{
+				EnvironmentId: env.Name,
+				Kind:          api.MySpaceActiveEnvironmentKindPlayground,
+				Runtime:       api.MySpaceActiveEnvironmentRuntime(runtimeName),
+				Phase:         string(env.Phase),
+				ExpiresAt:     expiresAt,
+			})
+			continue
+		}
 		if env.Phase != runtimev2.PhaseReady && env.Phase != runtimev2.PhaseDraining {
 			continue
 		}
@@ -105,12 +131,15 @@ func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimi
 			expires := env.ExpiresAt.UTC()
 			expiresAt = &expires
 		}
+		scenario := mySpaceScenario(*entry)
+		progress := checkpointProgressSummary(checkpoints, len(entry.Checkpoints))
 		active = append(active, api.MySpaceActiveEnvironment{
 			EnvironmentId:      env.Name,
-			Scenario:           mySpaceScenario(*entry),
+			Kind:               api.MySpaceActiveEnvironmentKindOperations,
+			Scenario:           &scenario,
 			Runtime:            api.MySpaceActiveEnvironmentRuntime(env.Runtime),
 			Phase:              string(env.Phase),
-			CheckpointProgress: checkpointProgressSummary(checkpoints, len(entry.Checkpoints)),
+			CheckpointProgress: &progress,
 			ExpiresAt:          expiresAt,
 		})
 	}
@@ -352,9 +381,9 @@ func mySpaceScenario(entry scenario.Entry) api.MySpaceScenario {
 
 func mySpaceContentSource(scenarioType scenario.ScenarioType) api.MySpaceScenarioContentSource {
 	if scenarioType == scenario.ScenarioDocumentationExample {
-		return api.Documentation
+		return api.MySpaceScenarioContentSourceDocumentation
 	}
-	return api.Operations
+	return api.MySpaceScenarioContentSourceOperations
 }
 
 func authoringSessionTitle(title string) string {

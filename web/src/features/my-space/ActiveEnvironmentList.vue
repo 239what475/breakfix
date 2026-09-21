@@ -6,12 +6,18 @@ const props = defineProps<{ environments: MySpaceActiveEnvironment[]; stoppingId
 const emit = defineEmits<{ start: [id: string]; stop: [id: string] }>();
 
 function checkpointLabel(environment: MySpaceActiveEnvironment) {
-  if (environment.checkpoint_progress.total === 0) return "No checkpoints";
+  if (!environment.checkpoint_progress || environment.checkpoint_progress.total === 0) return "No checkpoints";
   return `${environment.checkpoint_progress.passed}/${environment.checkpoint_progress.total} checkpoints`;
 }
 
-function sourceLabel(source: MySpaceActiveEnvironment["scenario"]["content_source"]) {
+function sourceLabel(source: string | undefined) {
   return source === "documentation" ? "Documentation" : "Operations";
+}
+
+const phaseLabels: Record<string, string> = { Pending: "Preparing", Provisioning: "Preparing", Ready: "Ready", Draining: "Draining" };
+
+function phaseLabel(environment: MySpaceActiveEnvironment) {
+  return phaseLabels[environment.phase] ?? environment.phase;
 }
 
 function expiryLabel(expiresAt?: string | null) {
@@ -34,10 +40,19 @@ function expiryLabel(expiresAt?: string | null) {
     <div v-if="environments.length" class="space-row-list">
       <article v-for="environment in environments" :key="environment.environment_id" class="space-row active-environment-row">
         <div class="space-row-main">
-          <div class="space-row-title"><h3>{{ environment.scenario.title }}</h3><span class="runtime-pill">{{ sourceLabel(environment.scenario.content_source) }}</span><span class="runtime-pill">{{ environment.runtime }}</span></div>
-          <div class="space-row-meta"><span>{{ checkpointLabel(environment) }}</span><span><TimerReset :size="13" aria-hidden="true" />{{ expiryLabel(environment.expires_at) }}</span></div>
+          <!-- The playground binds the user alone: no scenario identity, no
+               checkpoint progress, and its lifecycle verbs live on the
+               floating ball instead of this row. -->
+          <template v-if="environment.kind === 'playground'">
+            <div class="space-row-title"><h3>Playground</h3><span class="runtime-pill">Playground</span><span class="runtime-pill">{{ environment.runtime }}</span></div>
+            <div class="space-row-meta"><span>{{ phaseLabel(environment) }}</span><span><TimerReset :size="13" aria-hidden="true" />{{ expiryLabel(environment.expires_at) }}</span></div>
+          </template>
+          <template v-else-if="environment.scenario">
+            <div class="space-row-title"><h3>{{ environment.scenario.title }}</h3><span class="runtime-pill">{{ sourceLabel(environment.scenario.content_source) }}</span><span class="runtime-pill">{{ environment.runtime }}</span></div>
+            <div class="space-row-meta"><span>{{ checkpointLabel(environment) }}</span><span><TimerReset :size="13" aria-hidden="true" />{{ expiryLabel(environment.expires_at) }}</span></div>
+          </template>
         </div>
-        <div class="space-environment-actions">
+        <div v-if="environment.scenario" class="space-environment-actions">
           <button class="compact-button space-start-button" type="button" @click="emit('start', environment.scenario.id)"><Play :size="14" fill="currentColor" aria-hidden="true" />Start scenario</button>
           <button class="compact-button danger-button space-stop-button" type="button" :disabled="props.stoppingId === environment.scenario.id" @click="emit('stop', environment.scenario.id)"><Square :size="13" fill="currentColor" aria-hidden="true" />{{ props.stoppingId === environment.scenario.id ? "Stopping..." : "Stop" }}</button>
         </div>

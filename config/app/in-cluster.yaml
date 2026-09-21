@@ -58,6 +58,11 @@ agent:
 
 generator_workspace_idle_ttl: ${GENERATOR_WORKSPACE_IDLE_TTL}
 
+# Site-wide cap on concurrently active playground environments. Empty keeps
+# the built-in default of 10.
+playground:
+  max_active: ${BREAKFIX_PLAYGROUND_MAX_ACTIVE}
+
 opensandbox:
   base_url: ${BREAKFIX_OPENSANDBOX_BASE_URL}
   api_key_env: OPEN_SANDBOX_API_KEY

@@ -155,6 +155,19 @@ export type AdminRunnableActionPage = {
     items: Array<AdminRunnableActionItem>;
 };
 
+export type AdminRunnableReap = {
+    reap_key: string;
+    state: 'queued' | 'claimed' | 'succeeded';
+    attempt: number;
+    last_error: string;
+    next_attempt_at: string;
+    updated_at: string;
+};
+
+export type AdminRunnableReapList = {
+    reaps: Array<AdminRunnableReap>;
+};
+
 export type AdminEnvironment = {
     name: string;
     namespace: string;
@@ -280,10 +293,14 @@ export type MySpaceSummary = {
 
 export type MySpaceActiveEnvironment = {
     environment_id: string;
-    scenario: MySpaceScenario;
+    /**
+     * playground entries carry no scenario identity or checkpoint progress
+     */
+    kind: 'playground' | 'operations';
+    scenario?: MySpaceScenario;
     runtime: 'node' | 'k8s';
     phase: string;
-    checkpoint_progress: CheckpointProgressSummary;
+    checkpoint_progress?: CheckpointProgressSummary;
     expires_at?: string | null;
 };
 
@@ -872,6 +889,10 @@ export type CreatePlaygroundErrors = {
      * Error
      */
     401: ErrorResponse;
+    /**
+     * The site-wide active playground fleet is at the configured capacity; retry after a session closes
+     */
+    429: unknown;
 };
 
 export type CreatePlaygroundError = CreatePlaygroundErrors[keyof CreatePlaygroundErrors];
@@ -1149,6 +1170,35 @@ export type ListAdminRunnableActionsResponses = {
 };
 
 export type ListAdminRunnableActionsResponse = ListAdminRunnableActionsResponses[keyof ListAdminRunnableActionsResponses];
+
+export type ListAdminRunnableReapsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/admin/runnable-reaps';
+};
+
+export type ListAdminRunnableReapsErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+};
+
+export type ListAdminRunnableReapsError = ListAdminRunnableReapsErrors[keyof ListAdminRunnableReapsErrors];
+
+export type ListAdminRunnableReapsResponses = {
+    /**
+     * Reap queue observations
+     */
+    200: AdminRunnableReapList;
+};
+
+export type ListAdminRunnableReapsResponse = ListAdminRunnableReapsResponses[keyof ListAdminRunnableReapsResponses];
 
 export type ListAdminEnvironmentsData = {
     body?: never;

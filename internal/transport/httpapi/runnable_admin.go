@@ -66,6 +66,37 @@ func intSummary(counts map[string]int64) map[string]int {
 	return summary
 }
 
+// adminRunnableReapsLimit caps the observation surface: the reap queue is an
+// operator symptom view, not an export.
+const adminRunnableReapsLimit = 100
+
+// ListAdminRunnableReaps observes the durable reap queue behind environment
+// teardown. Two stuck-environment investigations had to query postgres
+// directly; this endpoint keeps that read behind the admin gate.
+func (h *Handler) ListAdminRunnableReaps(c *gin.Context) {
+	if h == nil || h.db == nil {
+		c.JSON(http.StatusServiceUnavailable, api.ErrorResponse{Error: "reap queue is unavailable"})
+		return
+	}
+	observations, err := h.db.Runnable.ListRunnableReapObservations(c.Request.Context(), adminRunnableReapsLimit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, api.ErrorResponse{Error: err.Error()})
+		return
+	}
+	reaps := make([]api.AdminRunnableReap, 0, len(observations))
+	for _, observation := range observations {
+		reaps = append(reaps, api.AdminRunnableReap{
+			ReapKey:       observation.ReapKey,
+			State:         api.AdminRunnableReapState(observation.State),
+			Attempt:       int(observation.Attempt),
+			LastError:     observation.LastError,
+			NextAttemptAt: observation.NextAttemptAt,
+			UpdatedAt:     observation.UpdatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, api.AdminRunnableReapList{Reaps: reaps})
+}
+
 func adminRunnableActionItem(observation postgres.RunnableActionObservation) api.AdminRunnableActionItem {
 	flag := ""
 	if observation.Attempt >= 4 {

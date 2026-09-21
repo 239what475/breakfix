@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +40,7 @@ type Config struct {
 	Runtime                   RuntimeConfig       `yaml:"runtime"`
 	Catalog                   CatalogConfig       `yaml:"catalog"`
 	Documentation             DocumentationConfig `yaml:"documentation"`
+	Playground                PlaygroundConfig    `yaml:"playground"`
 	AllowRegistration         bool                `yaml:"allow_registration"`
 	AgentStuckAfter           string              `yaml:"agent_stuck_after"`
 	GeneratorWorkspaceIdleTTL string              `yaml:"generator_workspace_idle_ttl"`
@@ -112,6 +114,31 @@ func (c DocumentationConfig) Validate() error {
 }
 
 func (c CatalogConfig) Enabled() bool { return strings.TrimSpace(c.ReleaseReference) != "" }
+
+// PlaygroundConfig bounds the site-wide playground fleet. The cap is a soft
+// admission gate on new sessions only: existing sessions, polling, reset, and
+// close are never blocked, and a concurrent-create counting race may briefly
+// admit a few extra sessions rather than trading for a distributed lock.
+type PlaygroundConfig struct {
+	MaxActive string `yaml:"max_active"`
+}
+
+// PlaygroundMaxActive defaults to 10 when the deployment sets nothing. The
+// built-in default is never a bypass: an unbounded fleet of per-user vclusters
+// is not a supported deployment.
+func (c Config) PlaygroundMaxActive() (int, error) {
+	value := strings.TrimSpace(c.Playground.MaxActive)
+	if value == "" {
+		return defaultPlaygroundMaxActive, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 0 {
+		return 0, fmt.Errorf("playground.max_active must be a non-negative integer")
+	}
+	return parsed, nil
+}
+
+const defaultPlaygroundMaxActive = 10
 
 // WorkspaceIdleTTL is a Server-wide resource policy. It is never controlled
 // by a user workflow and defaults to one day when omitted by deployment.
@@ -400,6 +427,7 @@ func Load(path string) (Config, error) {
 	cfg.Catalog.ReleaseReference = os.ExpandEnv(cfg.Catalog.ReleaseReference)
 	cfg.Documentation.LibraryRoot = os.ExpandEnv(cfg.Documentation.LibraryRoot)
 	cfg.GeneratorWorkspaceIdleTTL = os.ExpandEnv(cfg.GeneratorWorkspaceIdleTTL)
+	cfg.Playground.MaxActive = os.ExpandEnv(cfg.Playground.MaxActive)
 	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)
 	cfg.OpenSandbox.Namespace = os.ExpandEnv(cfg.OpenSandbox.Namespace)
 	cfg.UIOrigin = os.ExpandEnv(cfg.UIOrigin)
@@ -492,6 +520,9 @@ func (c Config) ValidateServer() error {
 		return fmt.Errorf("server %w", err)
 	}
 	if _, err := c.WorkspaceIdleTTL(); err != nil {
+		return fmt.Errorf("server %w", err)
+	}
+	if _, err := c.PlaygroundMaxActive(); err != nil {
 		return fmt.Errorf("server %w", err)
 	}
 	if err := c.OpenSandbox.Validate(); err != nil {
