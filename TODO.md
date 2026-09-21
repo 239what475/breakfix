@@ -1,76 +1,88 @@
 # TODO
 
-已完成的阶段见 git 历史(最近:文档门禁自动重试三笔 cfc5c9d/956f401/c0d65e5 与更早的文档管线建设——**产品方向已于 2026-09-21 变更,文档侧不再生成实践,全部相关代码在删除提交中移除**;fixture 退役与 reviewer 契约见 119f034;docs canary 与收尾见 dc85e1d);本文件保留当前阶段与未立项事项。
+已完成的阶段见 git 历史。本文件只保留最近一个阶段的收口记录与未立项事项。
 
-## 阶段:文档空白实践场景(2026-09-21 定案,本文件即执行计划)
+## 阶段收口:文档空白实践场景(2026-09-21 定案,2026-09-21 完成)
 
-### 0. 定案原则(与用户逐条确认)
+### 方向变更决策
 
-1. **文档不生成任何实践**。文档页面本身是教材;系统只提供"场地"——每用户一个空白 vk8s 场景,用户照文档自己操作。生成管线、judge、反馈回灌、发布语料、批次——整个问题域取消。
-2. **无锚点**。练习场是页面级甚至站点级的东西,不按章节切分。
-3. **每用户一个场景(方案 A)**:钉住库范围内全局唯一,跨页面携带;任何文档页右侧工具栏显示同一状态、操作同一实例。配额即"每人 1 个";要干净开始用"重置",不是换页新建。
-4. **不建模为目录 scenario**:空白场景就是 RuntimeEnvironment + 终端会话,不进 scenarios 目录、没有 runnable 修订、没有发布语义。
-5. **全部复用现有机器**:创建=RuntimeEnvironment 供给(vk8s provider),关闭=Stop/Release,重置=Reset(controller 调和器现有动词);终端 attach 复用实践会话机器(改绑用户);空闲 TTL/最长存活回收兜底,显式关闭是用户主动清理。
-6. **暂时只提供 vk8s 场景**;node/Incus 以后需要再加。
-7. **删除一次性完成**:旧文档生成世界在单个提交内删净,任何时刻只有一套实现;不做并行、不做兼容层。
+文档侧放弃一切生成:页面本身是教材,系统只提供"场地"。原先的答案——按页面锚点生成实践
+(planner→门禁→generator→门禁→物化→验证→发布)、批次铺量、看门狗、门禁拒绝自动重试——
+在投入 live 验收前被产品决策整体否决。替代答案是**每用户一个空白 vk8s 场景**:钉住库范围内
+全局唯一,跨页面携带;右侧竖向工具栏三动词(创建/重置/关闭);无锚点、无目录建模、无发布语义。
+空白场景就是 RuntimeEnvironment + 终端会话。
 
-### 1. 契约定稿
+### 交付(五笔提交)
 
-- **绑定键**:`(user_id, 库钉住身份)`——库钉住身份取 library PinnedContext 的 `source_id+commit+language`(整个库一个钉住版本,不含页面)。RuntimeEnvironment 命名确定性派生自绑定键,重建幂等(同键 AlreadyExists 则收养,同运维验证环境先例)。
-- **状态机(会话级,非工作流)**:`None → Creating → Ready → (Reset→Creating | Closed→None)`;供给失败落 `Failed`(可重试创建)。TTL 到期回收视为回到 None。状态查询走现有环境读模型。
-- **API(登录用户)**:
-  - `GET  /api/documentation/scenario` → `{state: none|creating|ready|failed, environment_id?}`;
-  - `POST /api/documentation/scenario` → 创建(幂等:已有非终态即返回现状;Failed/None 可重建);
-  - `POST /api/documentation/scenario/reset` → Ready 态专用(Reset 后回 Creating);
-  - `DELETE /api/documentation/scenario` → 关闭释放(Stop+Release)。
-  - openapi 同步再生成(`make generate`)。
-- **终端**:`POST /api/documentation/scenario/terminal`(或复用现有 attach 端点改绑)——Ready 后可 attach,面板复用现实践面板的终端组件。
-- **配额与生命周期**:每用户每库 1 个并发环境(CREATE 遇存量非终态返回现状);空闲 TTL/最长存活沿用现有 LifecyclePolicy(配置沿用实践环境既有值);重置不清 TTL 计时(Reset 后重新计)。
-- **前端**:文档页右侧**竖向工具栏**(创建/重置/关闭三按钮 + 状态徽标),全页面同一实例状态;实践面板改造为"空白场景终端面板"(去步骤/结论区)。
-- **admin**:保留环境与队列观测(现 admin 队列面);工作流/批次/语料观测随删除消失。
+1. `b9424a2` 空白场景后端:RuntimeEnvironment CRD 增加可选 `blankRuntime` 臂(CEL 与
+   `runnableRevisionRef` 互斥且不可变);reconciler 从控制器装配的 BlankRuntimePlan 解析空白环境,
+   Reset/Reap 走既有队列;EnvironmentProvider 以管理终端镜像供给空白 k8s 环境,终端通过
+   `BREAKFIX_DEFER_INITIALIZATION` 延迟初始化(k8s-base 入口脚本扩展);传输层 GET/POST/DELETE
+   `/api/documentation/scenario` + `/reset` + 终端票据;确定性环境名(用户+库钉住身份)即配额,
+   创建不阻塞、就绪靠轮询,重置是 Ready 态动词,关闭幂等。
+2. `bf72ebe` 前端:右侧竖向工具栏(状态徽标+三按钮,可用性矩阵 none/creating/ready/failed);
+   空白场景终端面板替换实践面板;`useBlankScenario` 组合式(非阻塞创建、轮询到就绪、匿名经
+   登录对话框续接);移除锚点实践按钮与每页实践索引查询。
+3. `9809890` 一次性删除(105 文件,-20423 行):domain/application 两个 documentpractice 包、
+   llm 适配器、postgres 仓库与 document_* 表(破坏式基线 51→52)、审计动作词表、runnable 队列
+   文档绑定列、admin 工作流/语料/批次端点与页面、实践链 e2e、admin e2e 工程、模型凭证注入。
+   幸存:docs-site 库与页面渲染、读者 API、RuntimeEnvironment/controller/vk8s/终端、runnable
+   公共队列、admin 环境与队列观测、request_timeout 15m。库内容类型(DocumentContext 等)移入
+   docsource 适配器。
+4. `809cf5a` 收口前加固(2026-09-22,首跑验收暴露的真实缺陷,一并修复后重验):
+   - **reaper 零超时**:空白绑定携带零值 runnable 修订,Stop/Release 直接读其 LifecyclePolicy
+     得到零超时、上下文即刻过期,回收永不成功。`EnvironmentBinding.Lifecycle()` 改为按臂取策略。
+   - **reap 队列外键**:`runnable_reaps.runnable_revision_digest` 原有指向 runnable_revisions 的
+     外键,空白计划摘要无对应行,入队即失败(破坏式基线 52→53,去外键,摘要语义改为"内容修订
+     或空白计划"二选一的栅栏)。
+   - **Release 所有权门**:b9424a2 声称空白 Release 以环境身份为栅栏,但 vk8s 所有权门未实现
+     ——Release 请求不带摘要,严格校验必败,而宽容路径要求 vcluster 标记(正常供给的 namespace
+     从未有)。现场:空白环境回收重试 110 次卡死 finalizer,e2e 首跑 prepare 因此超时。修复:
+     空白 Release(Blank 且无摘要)跳过摘要注解比对,UID 注解仍是栅栏;供给/重置保持摘要严格围栏。
+   - **供给期不可见**:label 查找在控制器首次观察前看不到环境(runtime provider 投影为空),
+     工具栏回退 none;改为按确定性名直读 + 身份校验。轮询 GET 在 Pending/Provisioning/Resetting
+     顺带续租,慢供给不再被空闲 TTL 饿死;Ready 后仍只认真实使用续租。
+   - **CRD 引用指针化**:`runnableRevisionRef` 值类型改指针,空白环境不再携带空壳引用;CEL 改
+     `has()` 语义("存在即完整"),id/digest 落 `MinLength=1` 字段级校验。
+   - e2e 登录辅助本地化(套件无 baseURL,经绝对 URL 驱动),`totpCode` 导出复用。
+5. 收口提交(本笔):文档 e2e 全绿证据 + 本记录。
 
-### 2. 提交 1:空白场景后端
+### e2e 形态
 
-- [ ] `internal/application/`新建空白场景服务(建议 `documentscenarios/`):绑定键解析、三动词(创建/重置/关闭)映射到 EnvironmentProvider 的 Provision/Reset/Stop+Release、状态读、每用户唯一约束(确定性环境名+收养语义);
-- [ ] 传输层:§1 四个端点 + openapi 再生成;读者登录态鉴权(与现实践会话一致);
-- [ ] bootstrap:服务装配(复用现有 k8s EnvironmentProvider/controller/LifecyclePolicy);
-- [ ] 单测:服务状态机(None→Creating→Ready;Reset;Closed;Failed 重建;幂等创建;配额 1)——用假 provider;handler 测试(含未登录/状态冲突);
-- 验证:`make test-unit`;`make verify-generated`;`make lint`。
+`test/documentation/scenario.e2e.spec.ts`:注册登录→工具栏创建→轮询 Ready→终端连接与命令回显
+(真实 vcluster)→重置回 Creating→再就绪→关闭回 None;TTL 兜底不测时长只测动词。
+`reader.smoke.spec.ts`:生成内容契约(锚点/告警/shiki)+视口驱动的目录抽屉+匿名工具栏静默。
+文档套件不再依赖模型(`RUN_AGENT_LIVE_E2E` 门取消,prepare 不再注入凭证);admin e2e 工程随对象
+一起消失,admin 控制台保留用户与审计两页。
 
-### 3. 提交 2:前端工具栏与面板改绑
+### 风险核实记录
 
-- [ ] 文档页右侧竖向工具栏组件(三按钮+状态徽标,按 GET 状态渲染;Creating 轮询到 Ready);
-- [ ] 终端面板改绑空白场景(去实践步骤/结论渲染);移除锚点实践按钮与"已发布实践"查询;
-- [ ] web 组件测:工具栏状态渲染、按钮可用性矩阵(none/creating/ready/failed)、面板 attach;
-- 验证:`make web-test-unit`。
+- **Reset 语义**:`EnvironmentProvider.Reset` 对 k8s 是先 `Delete`(整个 namespace/vcluster/
+  kubeconfig/终端 pod)再从零 `provisionK8s`,即"清空重建",符合定案,无需 Release+Provision 替代。
+- **计划摘要漂移**:空白环境的 Release 以环境身份为栅栏(UID)——首跑实测证明原实现并未兑现
+  (所有权门拒空白 Release,见交付 4),修复后供给/重置路径仍以摘要严格围栏(状态绑定 profile
+  digest,漂移即终态 Failed),Release 路径按 UID 放行。
+- **每活跃读者一个 vcluster 成本**:IdleTTL 900s/MaxLifetime 1800s 沿用实践环境既有值兜底;
+  全站并发上限留作后续项。
 
-### 4. 提交 3:旧文档生成世界一次性删除
+### 验收证据
 
-- [ ] **Go**:`internal/domain/documentpractice/`、`internal/application/documentpractice/`(全部:agent_pipeline/service/batch/batch_scheduler/watchdog/pipeline/candidate_generation/orchestrator/boundary/ignition)、`internal/adapter/llm/documentpractice.go`、`internal/adapter/postgres/documentpractice_repository.go`+`schema_documentpractice.go`、transport 的 documentation 点火/admin 工作流与批次与语料端点、bootstrap 的文档管线与批次装配;`document_batches`/`document_batch_items` 表及仓库方法一并删除;
-- [ ] **保留**:docs-site 库与页面渲染服务、读者 API、RuntimeEnvironment/controller/vk8s provider、runnable 公共队列(运维场景仍用)、admin 环境与队列观测、`config/app` 的 request_timeout 15m(通用 agent 配置);
-- [ ] **web**:admin 语料/批次/工作流页面与组件、12 态梯子、相关 API client 方法删除;
-- [ ] **e2e 同提交改写**:`test/documentation/` 重写为空白场景套件(创建→Ready→终端输入→重置→关闭;TTL 兜底不测时长只测动词);`test/admin/` 的 batch-rollout/watchdog-controls/workflow-rescue 三套件删除(其对象已不存在),admin.setup 与 auth_flow 中文档点火用例改写;`RUN_AGENT_LIVE_E2E` 门对文档侧取消(不再依赖模型);
-- [ ] 删除后全仓编译、全量单测、web 测、`make verify-generated` 绿。
-- 验证:`make test-unit`;`make web-test-unit`;`make verify-generated`;`make lint`。
+- 快车道:`make test-unit`、`make test-race`、`make web-test-unit`、`make verify-generated`、
+  `make lint` 全绿(2026-09-21 首验,2026-09-22 加固后复验)。
+- Kind 验收:`make test-e2e-documentation`。
+- E2E 结果:2026-09-21 首跑 PASS;2026-09-22 加固批后复跑 PASS(scenario-e2e + reader-smoke
+  2 passed),关闭后的空白环境 reap 两跳内 succeeded,集群无残留 RuntimeEnvironment/vk8s
+  namespace。
 
-### 5. 提交 4:验收收口
-
-- [ ] e2e(Kind 目标):`make test-e2e-documentation`(新空白场景套件)全绿;admin 剩余套件绿;快车道(`make test-unit`/`test-race`/`web-test-unit`/`verify-generated`)与 nightly 绿;
-- [ ] TODO 收口章:方向变更决策记录(为什么放弃生成)、删除清单摘要、验收证据。
-
-### 6. 风险与对策
-
-- **环境成本**:每活跃读者一个 vcluster;空闲 TTL+最长存活兜底,必要时后续加全站并发上限(配置项,后续项);
-- **Reset 语义**:确认 provider Reset 对 vk8s 是"清空重建 vcluster 数据"而非只重启(实现第一步核实,不符则 Reset=Release+Provision);
-- **删除破坏面**:单提交原子完成可整体 revert;e2e 与 web 同提交改写保证仓库任何提交点全绿;
-- **状态轮询**:Creating 阶段前端轮询 GET;后端不引入新推送机制。
-
-### 7. 已知后续(不属本阶段)
+## 已知后续(不属本阶段)
 
 - node/Incus 空白场景类型;全站并发上限配置;终态断言(学习闭环)若做另行立项;
-- 工作区崩溃孤儿沙箱/PVC 清扫(authoring 侧遗留);js-yaml ×3 等 Dependabot;ollama critical 无上游修复;#15 typescript 7 等 vue-tsc 跟进;
+- 工作区崩溃孤儿沙箱/PVC 清扫(authoring 侧遗留);js-yaml ×3 等 Dependabot;ollama critical
+  无上游修复;#15 typescript 7 等 vue-tsc 跟进;
 - 首次真实发布后部署侧验证无凭证直拉。
 
 ## 挂起待决策(不排期)
 
-- **内容治理/紧急下架**:场景侧非 authoring 内容无法下架、无管理员覆盖;索引 append-only 是刻意设计,与"紧急摘除"冲突。若做,方向是索引摘除/tombstone 而非删除数据——独立设计后另行立项,当前不做。
+- **内容治理/紧急下架**:场景侧非 authoring 内容无法下架、无管理员覆盖;索引 append-only 是
+  刻意设计,与"紧急摘除"冲突。若做,方向是索引摘除/tombstone 而非删除数据——独立设计后另行
+  立项,当前不做。
