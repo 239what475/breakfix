@@ -1,82 +1,102 @@
 # TODO
 
-已完成的阶段见 git 历史。本文件只保留最近一个阶段的收口记录与未立项事项。
+已完成的阶段见 git 历史(最近:文档空白实践场景 b9424a2..0384541,含首跑加固批 809cf5a——
+该阶段产物即本阶段的迁移对象,收口记录见 0384541)。本文件保留当前阶段与未立项事项。
 
-## 阶段收口:文档空白实践场景(2026-09-21 定案,2026-09-21 完成)
+## 阶段:用户 Playground(2026-09-22 定案,本文件即执行计划)
 
-### 方向变更决策
+### 0. 定案原则(与用户逐条确认)
 
-文档侧放弃一切生成:页面本身是教材,系统只提供"场地"。原先的答案——按页面锚点生成实践
-(planner→门禁→generator→门禁→物化→验证→发布)、批次铺量、看门狗、门禁拒绝自动重试——
-在投入 live 验收前被产品决策整体否决。替代答案是**每用户一个空白 vk8s 场景**:钉住库范围内
-全局唯一,跨页面携带;右侧竖向工具栏三动词(创建/重置/关闭);无锚点、无目录建模、无发布语义。
-空白场景就是 RuntimeEnvironment + 终端会话。
+1. **Playground 与文档无关**。空白练习环境的所有权从"文档库"迁移到"用户":环境本来就不读
+   任何文档内容,库绑定(`(user, 库钉住身份)`)是上一代产品框架的残留,且稀释了"每人一个"
+   的成本栅栏(读两个库可持有两个 vcluster)。环境机器(RuntimeEnvironment `blankRuntime` 臂、
+   reconciler、BlankRuntimePlan、provider、reaper、终端 attach、TTL)全部原样复用,**只改绑定层**。
+2. **每用户一个**(定案):确定性名即配额,跨页面、跨库、全站携带;要干净开始用"重置"。
+3. **入口是全站常驻悬浮球**(定案):登录用户在任意页面右下角可见,点击展开面板(状态徽标 +
+   创建/重置/关闭 + 终端);匿名用户不渲染球(静默)。文档页右侧工具栏与空白终端面板退役。
+4. **命名 playground**:UI 文案与 API 统一用 playground,与场景绑定的"环境"(operations
+   learning)严格分词。现有空白场景端点不产生审计动作,无动词表负担。
+5. **旧文档场景 API/前端同笔删除**:不做兼容、不并行,任何时刻只有一套实现。存量
+   `documentation-blank` 环境与新命名不冲突,TTL(IdleTTL 900s/MaxLifetime 1800s)自然回收,
+   无需迁移。
 
-### 交付(五笔提交)
+### 1. 契约定稿
 
-1. `b9424a2` 空白场景后端:RuntimeEnvironment CRD 增加可选 `blankRuntime` 臂(CEL 与
-   `runnableRevisionRef` 互斥且不可变);reconciler 从控制器装配的 BlankRuntimePlan 解析空白环境,
-   Reset/Reap 走既有队列;EnvironmentProvider 以管理终端镜像供给空白 k8s 环境,终端通过
-   `BREAKFIX_DEFER_INITIALIZATION` 延迟初始化(k8s-base 入口脚本扩展);传输层 GET/POST/DELETE
-   `/api/documentation/scenario` + `/reset` + 终端票据;确定性环境名(用户+库钉住身份)即配额,
-   创建不阻塞、就绪靠轮询,重置是 Ready 态动词,关闭幂等。
-2. `bf72ebe` 前端:右侧竖向工具栏(状态徽标+三按钮,可用性矩阵 none/creating/ready/failed);
-   空白场景终端面板替换实践面板;`useBlankScenario` 组合式(非阻塞创建、轮询到就绪、匿名经
-   登录对话框续接);移除锚点实践按钮与每页实践索引查询。
-3. `9809890` 一次性删除(105 文件,-20423 行):domain/application 两个 documentpractice 包、
-   llm 适配器、postgres 仓库与 document_* 表(破坏式基线 51→52)、审计动作词表、runnable 队列
-   文档绑定列、admin 工作流/语料/批次端点与页面、实践链 e2e、admin e2e 工程、模型凭证注入。
-   幸存:docs-site 库与页面渲染、读者 API、RuntimeEnvironment/controller/vk8s/终端、runnable
-   公共队列、admin 环境与队列观测、request_timeout 15m。库内容类型(DocumentContext 等)移入
-   docsource 适配器。
-4. `809cf5a` 收口前加固(2026-09-22,首跑验收暴露的真实缺陷,一并修复后重验):
-   - **reaper 零超时**:空白绑定携带零值 runnable 修订,Stop/Release 直接读其 LifecyclePolicy
-     得到零超时、上下文即刻过期,回收永不成功。`EnvironmentBinding.Lifecycle()` 改为按臂取策略。
-   - **reap 队列外键**:`runnable_reaps.runnable_revision_digest` 原有指向 runnable_revisions 的
-     外键,空白计划摘要无对应行,入队即失败(破坏式基线 52→53,去外键,摘要语义改为"内容修订
-     或空白计划"二选一的栅栏)。
-   - **Release 所有权门**:b9424a2 声称空白 Release 以环境身份为栅栏,但 vk8s 所有权门未实现
-     ——Release 请求不带摘要,严格校验必败,而宽容路径要求 vcluster 标记(正常供给的 namespace
-     从未有)。现场:空白环境回收重试 110 次卡死 finalizer,e2e 首跑 prepare 因此超时。修复:
-     空白 Release(Blank 且无摘要)跳过摘要注解比对,UID 注解仍是栅栏;供给/重置保持摘要严格围栏。
-   - **供给期不可见**:label 查找在控制器首次观察前看不到环境(runtime provider 投影为空),
-     工具栏回退 none;改为按确定性名直读 + 身份校验。轮询 GET 在 Pending/Provisioning/Resetting
-     顺带续租,慢供给不再被空闲 TTL 饿死;Ready 后仍只认真实使用续租。
-   - **CRD 引用指针化**:`runnableRevisionRef` 值类型改指针,空白环境不再携带空壳引用;CEL 改
-     `has()` 语义("存在即完整"),id/digest 落 `MinLength=1` 字段级校验。
-   - e2e 登录辅助本地化(套件无 baseURL,经绝对 URL 驱动),`totpCode` 导出复用。
-5. 收口提交(本笔):文档 e2e 全绿证据 + 本记录。
+- **绑定键**:`user_id`;确定性环境名 `playground-u-<uid>`(名字即配额);labels:`content-kind=
+  playground`、`breakfix.dev/user`、`breakfix.dev/purpose=learning`;不再携带库身份
+  (content-id/content-revision 从 playground 环境上消失)。按名直读 + 身份校验(user/purpose/
+  blank/活跃相位)沿用现 `findBlankScenarioEnvironment` 语义,目标解析去库化。
+- **状态机不变**:`none → creating → ready →(reset → creating | close → none)`;failed 可重建;
+  TTL 回收视为 none。轮询 GET 在 Pending/Provisioning/Resetting 顺带续租(慢供给不被空闲 TTL
+  饿死),Ready 后仍只认真实使用续租——两条均为现语义,平移。
+- **API**:
+  - `GET  /api/playground` → `{state: none|creating|ready|failed, environment_id?}`;
+  - `POST /api/playground` → 创建(幂等:非终态返回现状;failed/none 可重建);
+  - `POST /api/playground/reset` → Ready 态专用(回 creating);
+  - `DELETE /api/playground` → 关闭释放(幂等);
+  - `POST /api/playground/terminal` → 终端票据(Ready 后);
+  - openapi 同步再生成;`/api/documentation/scenario*` 四端点 + `/reset` + 票据端点同笔删除。
+- **前端**:
+  - 全局悬浮球(AppShell 层):状态徽标(none 灰/creating 进行中/ready 就绪/failed 失败),
+    固定右下角,登录可见、匿名不渲染、不发起任何请求;
+  - 点击展开右下抽屉面板 = 三动词按钮(可用性矩阵沿用 none/creating/ready/failed)+ 终端
+    (复用现 BlankScenarioPanel 的终端部分);Creating 轮询到 Ready;
+  - `usePlayground` 组合式(由 `useBlankScenario` 改绑:非阻塞创建、轮询到就绪);
+  - 键盘可达:球可 Tab 聚焦、面板 focus trap、Esc 收起;移动端悬浮球天然适配,面板为底部抽屉;
+  - 移除:`BlankScenarioToolbar`、文档页面板挂载、`useBlankScenario`、文档场景 API client 方法。
+- **My space**:配额计数按 `breakfix.dev/user` 标签统计,playground 天然计入;Overview 的
+  ActiveEnvironments 展示留作后续(不属本阶段)。
+- **e2e 归属**:悬浮球是全站功能,任意页面可驱动;套件沿用 `test-e2e-documentation` Kind 目标
+  与登录辅助(沿用现有 prepare,不再为 playground 新开 e2e 工程),spec 更名
+  `test/documentation/playground.e2e.spec.ts`。
 
-### e2e 形态
+### 2. 提交 1:playground 后端改绑
 
-`test/documentation/scenario.e2e.spec.ts`:注册登录→工具栏创建→轮询 Ready→终端连接与命令回显
-(真实 vcluster)→重置回 Creating→再就绪→关闭回 None;TTL 兜底不测时长只测动词。
-`reader.smoke.spec.ts`:生成内容契约(锚点/告警/shiki)+视口驱动的目录抽屉+匿名工具栏静默。
-文档套件不再依赖模型(`RUN_AGENT_LIVE_E2E` 门取消,prepare 不再注入凭证);admin e2e 工程随对象
-一起消失,admin 控制台保留用户与审计两页。
+- [ ] `internal/transport/httpapi/documentation_scenario.go` → `playground.go`:目标解析去库化
+      (不依赖库 PinnedContext 与文档库安装状态),环境名 `playground-u-<uid>`,labels
+      content-kind=playground;`environment_runtime.go` 的 `learningEnvironmentName` 增加无目标
+      派生或拆出 playground 变体;
+- [ ] 路由五端点挂 `server.go`;删除 `/api/documentation/scenario*` 全部路由与 handler;
+- [ ] openapi 再生成(`make generate`),web API client 同步再生成;
+- [ ] 单测:状态机(none→creating→ready;reset;close;failed 重建;幂等创建)、轮询续租、
+      供给期可见性(按名直读)、目标解析无库依赖(改绑现 documentation_scenario_test);
+- 验证:`make test-unit`;`make verify-generated`;`make lint`。
 
-### 风险核实记录
+### 3. 提交 2:前端悬浮球与文档页退役
 
-- **Reset 语义**:`EnvironmentProvider.Reset` 对 k8s 是先 `Delete`(整个 namespace/vcluster/
-  kubeconfig/终端 pod)再从零 `provisionK8s`,即"清空重建",符合定案,无需 Release+Provision 替代。
-- **计划摘要漂移**:空白环境的 Release 以环境身份为栅栏(UID)——首跑实测证明原实现并未兑现
-  (所有权门拒空白 Release,见交付 4),修复后供给/重置路径仍以摘要严格围栏(状态绑定 profile
-  digest,漂移即终态 Failed),Release 路径按 UID 放行。
-- **每活跃读者一个 vcluster 成本**:IdleTTL 900s/MaxLifetime 1800s 沿用实践环境既有值兜底;
-  全站并发上限留作后续项。
+- [ ] `web/src/features/playground/`:`PlaygroundFab`(悬浮球)+ `PlaygroundPanel`(抽屉面板,
+      含终端)+ `usePlayground`;AppShell 挂载(登录可见、匿名静默);
+- [ ] 移除 `BlankScenarioToolbar`/`BlankScenarioPanel` 挂载与组件、`useBlankScenario`、
+      文档场景 API client 方法;
+- [ ] web 组件测:球状态渲染、按钮可用性矩阵、面板 attach、匿名静默(不渲染零请求)、
+      键盘可达(聚焦/Esc/focus trap);
+- 验证:`make web-test-unit`。
 
-### 验收证据
+### 4. 提交 3:e2e 改写与收口
 
-- 快车道:`make test-unit`、`make test-race`、`make web-test-unit`、`make verify-generated`、
-  `make lint` 全绿(2026-09-21 首验,2026-09-22 加固后复验)。
-- Kind 验收:`make test-e2e-documentation`。
-- E2E 结果:2026-09-21 首跑 PASS;2026-09-22 加固批后复跑 PASS(scenario-e2e + reader-smoke
-  2 passed),关闭后的空白环境 reap 两跳内 succeeded,集群无残留 RuntimeEnvironment/vk8s
-  namespace。
+- [ ] `scenario.e2e.spec.ts` → `playground.e2e.spec.ts`:注册登录→悬浮球创建→轮询 Ready→
+      终端连接与命令回显(真实 vcluster)→重置回 Creating→再就绪→关闭回 None;关闭后 reap
+      真正 succeeded(无残留 CR/namespace,沿用本阶段验证手法);
+- [ ] `reader.smoke.spec.ts`:匿名断言改"悬浮球不渲染";文档页工具栏断言删除;
+- [ ] 快车道(`make test-unit`/`test-race`/`web-test-unit`/`verify-generated`/`lint`)与
+      `make test-e2e-documentation` 全绿;
+- [ ] TODO 收口章:迁移记录(库绑定→用户绑定)、验收证据。
 
-## 已知后续(不属本阶段)
+### 5. 风险与对策
 
-- node/Incus 空白场景类型;全站并发上限配置;终态断言(学习闭环)若做另行立项;
+- **悬浮球遮挡与可达性**:固定右下角、面板可收起;focus trap + Esc;移动端底部抽屉;组件测
+  覆盖键盘路径。
+- **全站轮询流量**:沿用现轮询间隔,登录用户才轮询、匿名零请求;退避留后续项。
+- **存量环境回收**:命名不同不冲突,TTL ≤30 分钟自然回收;部署后经 admin 队列观测确认 reaper
+  无积压。
+- **两套端点短暂并存**:不允许——旧端点在提交 1 同笔删除,e2e 同目标内改写,仓库任何提交点
+  全绿。
+- **概念混淆**:playground 与场景环境在 UI/API 严格分词;文档页不再出现任何场景入口。
+
+### 6. 已知后续(不属本阶段)
+
+- playground 的 node/Incus 类型、多实例(集合 API 与真配额数字)、My space ActiveEnvironments
+  展示、轮询退避、全站并发上限配置;终态断言(学习闭环)若做另行立项;
 - 工作区崩溃孤儿沙箱/PVC 清扫(authoring 侧遗留);js-yaml ×3 等 Dependabot;ollama critical
   无上游修复;#15 typescript 7 等 vue-tsc 跟进;
 - 首次真实发布后部署侧验证无凭证直拉。
