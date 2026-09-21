@@ -6,16 +6,7 @@ import type { DocumentationPageResponse } from "../../api/generated";
 import { documentationSource, libraryPathOf, urlPathOf } from "./documentation";
 import { renderDocumentMarkdown } from "./markdown";
 import DocumentationToc, { type TreeEntry } from "./DocumentationToc.vue";
-import BlankScenarioToolbar from "./BlankScenarioToolbar.vue";
-import BlankScenarioPanel from "./BlankScenarioPanel.vue";
-import { useBlankScenario } from "./useBlankScenario";
 import "./documentation.css";
-
-const props = defineProps<{ authSignal?: number }>();
-const emit = defineEmits<{
-  "request-auth": [];
-  notice: [text: string, kind?: "error" | "info"];
-}>();
 
 const entryUrlPath: string = documentationSource.entryPath;
 const loading = ref(false);
@@ -29,17 +20,6 @@ const tocFailed = ref(false);
 const tocOpen = ref(false);
 const tocCollapsed = ref(false);
 const article = ref<HTMLElement>();
-
-// The practice ground is page-independent: one blank scenario per reader on
-// the pinned library, driven from the right-side toolbar and shared by every
-// documentation page.
-const notify = (text: string, kind?: "error" | "info") => emit("notice", text, kind);
-const scenario = useBlankScenario(notify, () => emit("request-auth"));
-
-watch(
-  () => props.authSignal,
-  () => void scenario.resumeAfterAuth(),
-);
 
 const currentLibraryPath = computed(() => libraryPathOf(current.value.path));
 
@@ -208,7 +188,6 @@ watch(body, async () => {
 readLocation();
 void loadTreeRoots();
 void loadPage(current.value.hash);
-void scenario.refresh();
 window.addEventListener("popstate", handlePopState);
 onUnmounted(() => {
   window.removeEventListener("popstate", handlePopState);
@@ -218,9 +197,7 @@ onUnmounted(() => {
 
 <template>
   <section class="documentation-page" aria-label="Kubernetes documentation">
-    <!-- The grid reserves a rail column for the blank practice panel plus a
-         slim vertical toolbar on the right edge, shared by every page. -->
-    <div class="documentation-reader" :class="{ 'toc-collapsed': tocCollapsed, 'scenario-open': scenario.sessionOpen.value }">
+    <div class="documentation-reader" :class="{ 'toc-collapsed': tocCollapsed }">
       <button
         class="compact-button documentation-toc-toggle"
         type="button"
@@ -266,28 +243,6 @@ onUnmounted(() => {
           <p>Choose a page from the outline to start reading.</p>
         </div>
       </div>
-      <div class="documentation-rail">
-        <BlankScenarioPanel
-          v-if="scenario.sessionOpen.value"
-          :state="scenario.state.value"
-          :starting="scenario.starting.value"
-          :stopping="scenario.stopping.value"
-          :resetting="scenario.resetting.value"
-          :runtime="scenario.runtime.value"
-          @create="scenario.createFor()"
-          @reset="scenario.reset()"
-          @close="scenario.close()"
-        />
-      </div>
-      <BlankScenarioToolbar
-        :state="scenario.state.value"
-        :starting="scenario.starting.value"
-        :stopping="scenario.stopping.value"
-        :resetting="scenario.resetting.value"
-        @create="scenario.createFor()"
-        @reset="scenario.reset()"
-        @close="scenario.close()"
-      />
     </div>
   </section>
 </template>

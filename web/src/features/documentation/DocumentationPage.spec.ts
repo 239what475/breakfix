@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api/client";
 import { automockApi } from "../../test/client-mock";
 import DocumentationPage from "./DocumentationPage.vue";
-import { podLifecyclePage, podLifecyclePath, scenarioNone, scenarioReady, treeAt } from "./fixtures";
+import { podLifecyclePage, podLifecyclePath, treeAt } from "./fixtures";
 
 vi.mock("../../api/client", async (importOriginal) => {
 	const { automockApi } = await import("../../test/client-mock");
@@ -84,7 +84,6 @@ describe("DocumentationPage", () => {
 		vi.stubGlobal("IntersectionObserver", IntersectionObserverStub);
 		vi.mocked(api.getDocumentationTree).mockImplementation(async (path?: string) => treeAt(path));
 		vi.mocked(api.getDocumentationPage).mockResolvedValue(podLifecyclePage);
-		vi.mocked(api.getDocumentationScenario).mockResolvedValue(scenarioNone);
 	});
 
 	afterEach(() => {
@@ -160,40 +159,5 @@ describe("DocumentationPage", () => {
 			{} as IntersectionObserver,
 		);
 		expect(window.location.search).toContain("hash=pod-lifetime");
-	});
-
-	it("carries the blank scenario session in the page rail", async () => {
-		window.history.replaceState({}, "", podLifecycleUrl);
-		vi.mocked(api.getDocumentationScenario).mockResolvedValue(scenarioReady);
-		wrapper = mountReader();
-		await waitForArticle(wrapper);
-
-		// The toolbar reflects the shared session state on every page.
-		const toolbar = wrapper.get("aside.scenario-toolbar");
-		expect(toolbar.get(".scenario-toolbar-badge").text()).toBe("Ready");
-		expect(toolbar.get('button[aria-label="Create blank scenario"]').attributes("disabled")).toBeDefined();
-		expect(toolbar.get('button[aria-label="Reset blank scenario"]').attributes("disabled")).toBeUndefined();
-		expect(toolbar.get('button[aria-label="Close blank scenario"]').attributes("disabled")).toBeUndefined();
-
-		const reader = wrapper.get(".documentation-reader");
-		expect(reader.classes()).toContain("scenario-open");
-		const panel = wrapper.get(".scenario-panel");
-		expect(panel.text()).toContain("Blank scenario");
-		expect(panel.find(".scenario-panel-terminal").exists()).toBe(true);
-
-		await panel.get('button[aria-label="Close practice panel"]').trigger("click");
-		await flushPromises();
-		expect(api.closeDocumentationScenario).toHaveBeenCalled();
-	});
-
-	it("asks for a login before creating the blank scenario anonymously", async () => {
-		window.history.replaceState({}, "", podLifecycleUrl);
-		localStorage.removeItem("token");
-		wrapper = mountReader();
-		await waitForArticle(wrapper);
-
-		await wrapper.get('button[aria-label="Create blank scenario"]').trigger("click");
-		expect(wrapper.emitted("request-auth")).toHaveLength(1);
-		expect(api.createDocumentationScenario).not.toHaveBeenCalled();
 	});
 });

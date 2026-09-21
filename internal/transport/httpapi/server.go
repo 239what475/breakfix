@@ -146,18 +146,16 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	router.GET("/api/documentation/page", optionalJWTMW, h.GetDocumentationPage)
 	router.GET("/api/documentation/tree", optionalJWTMW, h.GetDocumentationTree)
 	router.GET("/api/documentation/asset", optionalJWTMW, h.GetDocumentationAsset)
-	documentationRoutes := router.Group("/api/documentation")
-	documentationRoutes.Use(jwtMW)
-	// The blank practice scenario is a per-user session verb scoped to the
-	// pinned library: one environment per user, carried across every page.
-	documentationRoutes.GET("/scenario", h.GetDocumentationScenario)
-	documentationRoutes.POST("/scenario", h.StartDocumentationScenario)
-	documentationRoutes.POST("/scenario/reset", h.ResetDocumentationScenario)
-	documentationRoutes.DELETE("/scenario", h.StopDocumentationScenario)
-	documentationRoutes.POST("/scenario/terminal-ticket", h.CreateBlankScenarioTerminalTicket)
+	// The playground is a per-user session verb bound to the user alone: one
+	// environment per user, carried across the whole site.
+	router.GET("/api/playground", jwtMW, h.GetPlayground)
+	router.POST("/api/playground", jwtMW, h.StartPlayground)
+	router.POST("/api/playground/reset", jwtMW, h.ResetPlayground)
+	router.DELETE("/api/playground", jwtMW, h.StopPlayground)
+	router.POST("/api/playground/terminal-ticket", jwtMW, h.CreatePlaygroundTerminalTicket)
 	// The terminal WebSocket authenticates with the one-time ticket instead of
 	// the JWT, exactly like the operations terminal.
-	router.GET("/api/documentation/scenario/terminal", h.HandleBlankScenarioTerminalTicket)
+	router.GET("/api/playground/terminal", h.HandlePlaygroundTerminalTicket)
 	adminRoutes := router.Group("/api/admin")
 	adminRoutes.Use(jwtMW, middleware.RequireAdmin())
 	adminRoutes.GET("/users", h.ListAdminUsers)

@@ -4,34 +4,18 @@
   background: var(--wash);
 }
 
-/* Three named columns: outline, body, and a reserved practice rail, plus the
-   slim vertical toolbar pinned to the right edge. */
+/* Two named columns: outline and body. */
 .documentation-reader {
   position: relative;
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr) 0 44px;
-  grid-template-areas: "toc body rail toolbar";
+  grid-template-columns: 264px minmax(0, 1fr);
+  grid-template-areas: "toc body";
   height: 100%;
   min-height: 0;
 }
 
 .documentation-reader.toc-collapsed {
-  grid-template-columns: 0 minmax(0, 1fr) 0 44px;
-}
-
-/* An open practice session hands the outline's column to the panel. */
-.documentation-reader.scenario-open {
-  grid-template-columns: 0 minmax(0, 1fr) minmax(360px, 32%) 44px;
-}
-
-.documentation-reader.scenario-open .documentation-toc {
-  border-right: 0;
-  padding: 0;
-  overflow: hidden;
-}
-
-.documentation-reader.scenario-open .documentation-toc-head {
-  display: none;
+  grid-template-columns: 0 minmax(0, 1fr);
 }
 
 .documentation-toc {
@@ -356,176 +340,15 @@
   max-width: 100%;
 }
 
-.documentation-rail {
-  grid-area: rail;
-  min-height: 0;
-  overflow: auto;
-}
-
-/* The vertical toolbar pinned to the reader's right edge: one state badge and
-   the three session verbs (create, reset, close). */
-.scenario-toolbar {
-  grid-area: toolbar;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 0;
-  border-left: 1px solid var(--line);
-  background: #fff;
-}
-
-.scenario-toolbar-badge {
-  writing-mode: vertical-rl;
-  padding: 8px 4px;
-  border-radius: 999px;
-  color: var(--muted);
-  background: var(--wash);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.scenario-toolbar-badge[data-state="ready"] {
-  color: var(--green);
-}
-
-.scenario-toolbar-badge[data-state="failed"] {
-  color: var(--red);
-}
-
-.scenario-toolbar-buttons {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.scenario-toolbar-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: none;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.scenario-toolbar-button:hover:not(:disabled),
-.scenario-toolbar-button:focus-visible:not(:disabled) {
-  border-color: var(--green);
-  color: var(--green);
-}
-
-.scenario-toolbar-button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.scenario-toolbar-button .spinning {
-  animation: scenario-spin 1s linear infinite;
-}
-
-@keyframes scenario-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* The blank practice panel: guidance stays in the page; the panel is the
-   session state plus the terminal. */
-.scenario-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-  padding: 16px 16px 32px;
-  border-left: 1px solid var(--line);
-  background: #fff;
-}
-
-.scenario-panel-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-}
-
-.scenario-panel-kicker {
-  color: var(--green);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.scenario-panel-title {
-  margin: 2px 0 0;
-  color: var(--ink);
-  font-size: 18px;
-  line-height: 1.3;
-}
-
-.scenario-panel-hint {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.scenario-panel-state {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--muted);
-  background: var(--wash);
-  font-size: 12px;
-}
-
-.scenario-panel-state-error {
-  color: var(--red);
-}
-
-.scenario-panel-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.scenario-panel-terminal {
-  display: flex;
-  flex-direction: column;
-  min-height: 260px;
-  flex: 1 1 auto;
-}
-
-.scenario-panel-terminal .terminal-body {
-  flex: 1 1 auto;
-  min-height: 200px;
-}
-
 .documentation-toc-backdrop {
   display: none;
 }
 
 @media (max-width: 900px) {
   .documentation-reader,
-  .documentation-reader.toc-collapsed,
-  .documentation-reader.scenario-open {
-    grid-template-columns: minmax(0, 1fr) 0;
-    grid-template-areas: "body rail";
-  }
-
-  /* Mobile is read-only: no practice session, no toolbar. */
-  .scenario-toolbar,
-  .scenario-panel {
-    display: none;
+  .documentation-reader.toc-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "body";
   }
 
   .documentation-toc-toggle,

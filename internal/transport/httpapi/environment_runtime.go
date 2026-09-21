@@ -81,6 +81,9 @@ func (h *Handler) environmentRuntimeAdapter(runtime string) (*environmentRuntime
 			return "", fmt.Errorf("runnable revision store is unavailable")
 		}
 		name := learningEnvironmentName(user.ID, target)
+		if target.kind == environmentContentPlayground {
+			name = playgroundEnvironmentName(user.ID)
+		}
 		now := metav1.NewTime(time.Now().UTC().Truncate(time.Second))
 		environment := &runtimev2.RuntimeEnvironment{
 			ObjectMeta: environmentObjectMeta(name, h.crdNamespace, user.ID, target.kind, target.id, target.revisionID, runtimev2.PurposeLearning),
@@ -155,15 +158,26 @@ func learningEnvironmentName(userID string, target environmentContentTarget) str
 	return kubernetes.DNSLabelName("learning", userID, target.id, target.revisionID)
 }
 
+// playgroundEnvironmentName is the user's playground identity: the name alone
+// is the quota and the ownership fence, carried across the whole site.
+func playgroundEnvironmentName(userID string) string {
+	return kubernetes.DNSLabelName("playground", userID)
+}
+
 func environmentObjectMeta(name, namespace, userID, contentKind, contentID, contentRevision string, purpose runtimev2.EnvironmentPurpose) metav1.ObjectMeta {
-	return metav1.ObjectMeta{
-		Name: name, Namespace: namespace,
-		Labels: map[string]string{
-			"breakfix.dev/user": userID, "breakfix.dev/content-kind": contentKind,
-			"breakfix.dev/content-id": contentID, "breakfix.dev/content-revision": contentRevision,
-			"breakfix.dev/purpose": string(purpose),
-		},
+	labels := map[string]string{
+		"breakfix.dev/user": userID, "breakfix.dev/content-kind": contentKind,
+		"breakfix.dev/purpose": string(purpose),
 	}
+	// The playground pins no content identity; its environments carry no
+	// content labels at all.
+	if contentID != "" {
+		labels["breakfix.dev/content-id"] = contentID
+	}
+	if contentRevision != "" {
+		labels["breakfix.dev/content-revision"] = contentRevision
+	}
+	return metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: labels}
 }
 
 func nowActivity() metav1.Time {

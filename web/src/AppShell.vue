@@ -193,9 +193,6 @@ onUnmounted(() => window.removeEventListener("popstate", handlePopState));
 		<main class="app-main">
       <DocumentationPage
         v-if="!workspace && !authoringOpen && page === 'documentation'"
-        :auth-signal="authSignal"
-        @request-auth="openAuth('login')"
-        @notice="notify"
       />
       <ScenarioCatalogPage
 		v-show="!workspace && !authoringOpen && page === 'operations'"

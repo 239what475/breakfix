@@ -21,11 +21,11 @@ var errNoActiveAssistantEnvironment = errors.New("no active environment for assi
 
 const (
 	// environmentContentOperations is the content-kind label of environments
-	// pinned to Operations scenarios; environmentContentDocumentationBlank
-	// pins the library-scoped blank practice environment each reader may run
-	// alongside the documentation.
-	environmentContentOperations         = "operations"
-	environmentContentDocumentationBlank = "documentation-blank"
+	// pinned to Operations scenarios; environmentContentPlayground pins the
+	// user's personal blank practice environment, which binds the user alone
+	// and carries no content identity.
+	environmentContentOperations = "operations"
+	environmentContentPlayground = "playground"
 )
 
 // environmentContentTarget is the content identity one learning environment is
@@ -451,10 +451,23 @@ func (h *Handler) waitEnvironmentReady(ctx context.Context, runtime, name string
 }
 
 func environmentMatchesTarget(environment *activeEnvironment, userID string, target environmentContentTarget) bool {
+	if environment == nil {
+		return false
+	}
+	if target.kind == environmentContentPlayground {
+		// The playground pins no content identity: the deterministic name
+		// (already the read key) plus the user, blank arm, and runtime make
+		// the whole fence, so concurrent creators adopt instead of racing.
+		return environment.UserID == userID &&
+			environment.Purpose == runtimev2.PurposeLearning &&
+			environment.ScenarioRef == "" && environment.SourceRevision == "" &&
+			(environment.Runtime == target.runtime || environment.Runtime == "") &&
+			environment.Blank
+	}
 	// An environment still provisioning projects no runtime provider yet; it
 	// matches any target whose identity fences it, so concurrent creators
 	// adopt it instead of rejecting the race.
-	return environment != nil && target.id != "" &&
+	return target.id != "" &&
 		environment.UserID == userID &&
 		environment.Purpose == runtimev2.PurposeLearning &&
 		environment.ScenarioRef == target.id &&

@@ -1,6 +1,5 @@
 import type {
 	DocumentationPageResponse,
-	DocumentationScenarioEnvironment,
 	DocumentationTreeResponse,
 } from "../../api/generated";
 
@@ -66,24 +65,4 @@ export const podLifecyclePage: DocumentationPageResponse = {
 	].join("\n"),
 	anchors: [{ id: "pod-lifetime", level: 2, title: "Pod Lifetime" }],
 	assets: [],
-};
-
-export const scenarioNone: DocumentationScenarioEnvironment = { state: "none" };
-
-export const scenarioCreating: DocumentationScenarioEnvironment = {
-	state: "creating",
-	environment_id: "environment-1",
-	runtime: "k8s",
-};
-
-export const scenarioReady: DocumentationScenarioEnvironment = {
-	state: "ready",
-	environment_id: "environment-1",
-	runtime: "k8s",
-};
-
-export const scenarioFailed: DocumentationScenarioEnvironment = {
-	state: "failed",
-	environment_id: "environment-1",
-	runtime: "k8s",
 };

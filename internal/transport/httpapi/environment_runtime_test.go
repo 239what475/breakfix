@@ -15,9 +15,16 @@ func TestEnvironmentObjectMetaCarriesGenericContentIdentity(t *testing.T) {
 	if operations.Labels["breakfix.dev/content-kind"] != "operations" || operations.Labels["breakfix.dev/content-id"] != "demo" || operations.Labels["breakfix.dev/content-revision"] != "chrev-aaaaaaaaaaaaaaaa" {
 		t.Fatalf("environment labels = %#v", operations.Labels)
 	}
-	blank := environmentObjectMeta("learning-blank", "breakfix-system", "u-demo", environmentContentDocumentationBlank, "blank-01", "blank-01", runtimev2.PurposeLearning)
-	if blank.Labels["breakfix.dev/content-kind"] != "documentation-blank" || blank.Labels["breakfix.dev/content-id"] != "blank-01" || blank.Labels["breakfix.dev/content-revision"] != "blank-01" {
-		t.Fatalf("blank environment labels = %#v", blank.Labels)
+	// The playground pins no content identity: no content labels at all.
+	playground := environmentObjectMeta("playground-u-demo", "breakfix-system", "u-demo", environmentContentPlayground, "", "", runtimev2.PurposeLearning)
+	if playground.Labels["breakfix.dev/content-kind"] != "playground" {
+		t.Fatalf("playground kind label = %#v", playground.Labels)
+	}
+	if _, found := playground.Labels["breakfix.dev/content-id"]; found {
+		t.Fatalf("playground carries a content identity: %#v", playground.Labels)
+	}
+	if _, found := playground.Labels["breakfix.dev/content-revision"]; found {
+		t.Fatalf("playground carries a content revision: %#v", playground.Labels)
 	}
 	if _, found := operations.Labels["breakfix.dev/scenario"]; found {
 		t.Fatalf("environment metadata retained a scenario-specific label: %#v", operations.Labels)

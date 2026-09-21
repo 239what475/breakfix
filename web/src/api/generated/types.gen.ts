@@ -48,7 +48,7 @@ export type DocumentationTreeResponse = {
     nodes: Array<DocumentationTreeNode>;
 };
 
-export type DocumentationScenarioEnvironment = {
+export type PlaygroundEnvironment = {
     /**
      * Session state; lifecycle reclamation reads as none
      */
@@ -63,7 +63,7 @@ export type DocumentationScenarioEnvironment = {
     runtime?: string;
 };
 
-export type DocumentationScenarioCloseResponse = {
+export type PlaygroundCloseResponse = {
     closed: boolean;
 };
 
@@ -810,89 +810,89 @@ export type GetDocumentationAssetResponses = {
 
 export type GetDocumentationAssetResponse = GetDocumentationAssetResponses[keyof GetDocumentationAssetResponses];
 
-export type CloseDocumentationScenarioData = {
+export type ClosePlaygroundData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/documentation/scenario';
+    url: '/playground';
 };
 
-export type CloseDocumentationScenarioErrors = {
+export type ClosePlaygroundErrors = {
     /**
      * Error
      */
     401: ErrorResponse;
 };
 
-export type CloseDocumentationScenarioError = CloseDocumentationScenarioErrors[keyof CloseDocumentationScenarioErrors];
+export type ClosePlaygroundError = ClosePlaygroundErrors[keyof ClosePlaygroundErrors];
 
-export type CloseDocumentationScenarioResponses = {
+export type ClosePlaygroundResponses = {
     /**
      * Session closed
      */
-    200: DocumentationScenarioCloseResponse;
+    200: PlaygroundCloseResponse;
 };
 
-export type CloseDocumentationScenarioResponse = CloseDocumentationScenarioResponses[keyof CloseDocumentationScenarioResponses];
+export type ClosePlaygroundResponse = ClosePlaygroundResponses[keyof ClosePlaygroundResponses];
 
-export type GetDocumentationScenarioData = {
+export type GetPlaygroundData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/documentation/scenario';
+    url: '/playground';
 };
 
-export type GetDocumentationScenarioErrors = {
+export type GetPlaygroundErrors = {
     /**
      * Error
      */
     401: ErrorResponse;
 };
 
-export type GetDocumentationScenarioError = GetDocumentationScenarioErrors[keyof GetDocumentationScenarioErrors];
+export type GetPlaygroundError = GetPlaygroundErrors[keyof GetPlaygroundErrors];
 
-export type GetDocumentationScenarioResponses = {
+export type GetPlaygroundResponses = {
     /**
      * Current session state; state is none when no environment exists
      */
-    200: DocumentationScenarioEnvironment;
+    200: PlaygroundEnvironment;
 };
 
-export type GetDocumentationScenarioResponse = GetDocumentationScenarioResponses[keyof GetDocumentationScenarioResponses];
+export type GetPlaygroundResponse = GetPlaygroundResponses[keyof GetPlaygroundResponses];
 
-export type CreateDocumentationScenarioData = {
+export type CreatePlaygroundData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/documentation/scenario';
+    url: '/playground';
 };
 
-export type CreateDocumentationScenarioErrors = {
+export type CreatePlaygroundErrors = {
     /**
      * Error
      */
     401: ErrorResponse;
 };
 
-export type CreateDocumentationScenarioError = CreateDocumentationScenarioErrors[keyof CreateDocumentationScenarioErrors];
+export type CreatePlaygroundError = CreatePlaygroundErrors[keyof CreatePlaygroundErrors];
 
-export type CreateDocumentationScenarioResponses = {
+export type CreatePlaygroundResponses = {
     /**
      * Session state after creation or adoption
      */
-    200: DocumentationScenarioEnvironment;
+    200: PlaygroundEnvironment;
 };
 
-export type CreateDocumentationScenarioResponse = CreateDocumentationScenarioResponses[keyof CreateDocumentationScenarioResponses];
+export type CreatePlaygroundResponse = CreatePlaygroundResponses[keyof CreatePlaygroundResponses];
 
-export type ResetDocumentationScenarioData = {
+export type ResetPlaygroundData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/documentation/scenario/reset';
+    url: '/playground/reset';
 };
 
-export type ResetDocumentationScenarioErrors = {
+export type ResetPlaygroundErrors = {
     /**
      * Error
      */
@@ -903,25 +903,25 @@ export type ResetDocumentationScenarioErrors = {
     409: ErrorResponse;
 };
 
-export type ResetDocumentationScenarioError = ResetDocumentationScenarioErrors[keyof ResetDocumentationScenarioErrors];
+export type ResetPlaygroundError = ResetPlaygroundErrors[keyof ResetPlaygroundErrors];
 
-export type ResetDocumentationScenarioResponses = {
+export type ResetPlaygroundResponses = {
     /**
      * Reset requested; the session returns to creating
      */
-    200: DocumentationScenarioEnvironment;
+    200: PlaygroundEnvironment;
 };
 
-export type ResetDocumentationScenarioResponse = ResetDocumentationScenarioResponses[keyof ResetDocumentationScenarioResponses];
+export type ResetPlaygroundResponse = ResetPlaygroundResponses[keyof ResetPlaygroundResponses];
 
-export type CreateBlankScenarioTerminalTicketData = {
+export type CreatePlaygroundTerminalTicketData = {
     body: TerminalTicketRequest;
     path?: never;
     query?: never;
-    url: '/documentation/scenario/terminal-ticket';
+    url: '/playground/terminal-ticket';
 };
 
-export type CreateBlankScenarioTerminalTicketErrors = {
+export type CreatePlaygroundTerminalTicketErrors = {
     /**
      * Error
      */
@@ -932,16 +932,16 @@ export type CreateBlankScenarioTerminalTicketErrors = {
     404: ErrorResponse;
 };
 
-export type CreateBlankScenarioTerminalTicketError = CreateBlankScenarioTerminalTicketErrors[keyof CreateBlankScenarioTerminalTicketErrors];
+export type CreatePlaygroundTerminalTicketError = CreatePlaygroundTerminalTicketErrors[keyof CreatePlaygroundTerminalTicketErrors];
 
-export type CreateBlankScenarioTerminalTicketResponses = {
+export type CreatePlaygroundTerminalTicketResponses = {
     /**
      * Short-lived one-time terminal ticket
      */
     200: TerminalTicketResponse;
 };
 
-export type CreateBlankScenarioTerminalTicketResponse = CreateBlankScenarioTerminalTicketResponses[keyof CreateBlankScenarioTerminalTicketResponses];
+export type CreatePlaygroundTerminalTicketResponse = CreatePlaygroundTerminalTicketResponses[keyof CreatePlaygroundTerminalTicketResponses];
 
 export type RegisterData = {
     body: RegisterRequest;

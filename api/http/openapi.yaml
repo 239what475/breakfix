@@ -98,12 +98,12 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
 
-  /documentation/scenario:
+  /playground:
     get:
-      operationId: getDocumentationScenario
-      summary: Report the reader's blank practice scenario session (JWT)
-      description: One blank scenario per user, scoped to the pinned library and carried across every documentation page.
-      tags: [documentation]
+      operationId: getPlayground
+      summary: Report the user's playground session (JWT)
+      description: One playground per user, bound to the user alone and carried across the whole site.
+      tags: [playground]
       security:
         - bearerAuth: []
       responses:
@@ -112,14 +112,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DocumentationScenarioEnvironment"
+                $ref: "#/components/schemas/PlaygroundEnvironment"
         "401":
           $ref: "#/components/responses/Error"
     post:
-      operationId: createDocumentationScenario
-      summary: Create or adopt the reader's blank practice scenario (JWT)
+      operationId: createPlayground
+      summary: Create or adopt the user's playground (JWT)
       description: Idempotent find-or-create; the response returns as soon as the environment is named and readiness arrives through polling.
-      tags: [documentation]
+      tags: [playground]
       security:
         - bearerAuth: []
       responses:
@@ -128,14 +128,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DocumentationScenarioEnvironment"
+                $ref: "#/components/schemas/PlaygroundEnvironment"
         "401":
           $ref: "#/components/responses/Error"
     delete:
-      operationId: closeDocumentationScenario
-      summary: Close the blank practice scenario and release its resources (JWT)
+      operationId: closePlayground
+      summary: Close the playground and release its resources (JWT)
       description: Closing without an active session is a successful no-op.
-      tags: [documentation]
+      tags: [playground]
       security:
         - bearerAuth: []
       responses:
@@ -144,16 +144,16 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DocumentationScenarioCloseResponse"
+                $ref: "#/components/schemas/PlaygroundCloseResponse"
         "401":
           $ref: "#/components/responses/Error"
 
-  /documentation/scenario/reset:
+  /playground/reset:
     post:
-      operationId: resetDocumentationScenario
-      summary: Wipe the blank practice scenario to a fresh state (JWT)
+      operationId: resetPlayground
+      summary: Wipe the playground to a fresh state (JWT)
       description: A Ready-session verb; an in-flight reset stays idempotent and returns the current session state.
-      tags: [documentation]
+      tags: [playground]
       security:
         - bearerAuth: []
       responses:
@@ -162,17 +162,17 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DocumentationScenarioEnvironment"
+                $ref: "#/components/schemas/PlaygroundEnvironment"
         "401":
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
 
-  /documentation/scenario/terminal-ticket:
+  /playground/terminal-ticket:
     post:
-      operationId: createBlankScenarioTerminalTicket
-      summary: Create a one-time ticket for the blank scenario terminal WebSocket (JWT)
-      tags: [documentation]
+      operationId: createPlaygroundTerminalTicket
+      summary: Create a one-time ticket for the playground terminal WebSocket (JWT)
+      tags: [playground]
       security:
         - bearerAuth: []
       requestBody:
@@ -1333,7 +1333,7 @@ components:
           items:
             $ref: "#/components/schemas/DocumentationTreeNode"
 
-    DocumentationScenarioEnvironment:
+    PlaygroundEnvironment:
       type: object
       required: [state]
       properties:
@@ -1348,7 +1348,7 @@ components:
           type: string
           description: Runtime kind, for example k8s
 
-    DocumentationScenarioCloseResponse:
+    PlaygroundCloseResponse:
       type: object
       required: [closed]
       properties:

@@ -13,8 +13,6 @@ import type {
 } from "./types";
 import type {
 	DocumentationPageResponse,
-	DocumentationScenarioCloseResponse,
-	DocumentationScenarioEnvironment,
 	DocumentationTreeResponse,
 	ScenarioList,
 	ScenarioProgress,
@@ -250,18 +248,6 @@ export const api = {
 			"GET",
 			path ? `/documentation/tree?path=${encodeURIComponent(path)}` : "/documentation/tree",
 		),
-	// One blank practice scenario per reader, scoped to the pinned library and
-	// carried across every documentation page.
-	getDocumentationScenario: () =>
-		request<DocumentationScenarioEnvironment>("GET", "/documentation/scenario"),
-	createDocumentationScenario: () =>
-		request<DocumentationScenarioEnvironment>("POST", "/documentation/scenario"),
-	resetDocumentationScenario: () =>
-		request<DocumentationScenarioEnvironment>("POST", "/documentation/scenario/reset"),
-	closeDocumentationScenario: () =>
-		request<DocumentationScenarioCloseResponse>("DELETE", "/documentation/scenario"),
-	createBlankScenarioTerminalTicket: (window: string, node?: string) =>
-		request<TerminalTicketResponse>("POST", "/documentation/scenario/terminal-ticket", { window, node }),
 	getMySpace: () => request<MySpace>("GET", "/me/space"),
 	getMySpaceLearning: ({ cursor, limit = 20, state, runtime }: MySpaceLearningQuery = {}) => {
 		const query = new URLSearchParams({ limit: String(limit) });

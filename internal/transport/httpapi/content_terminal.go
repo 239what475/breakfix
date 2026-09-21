@@ -15,8 +15,7 @@ import (
 )
 
 // createContentTerminalTicket mints the one-time ticket for whichever content
-// target owns the environment: today the reader's blank documentation
-// scenario.
+// target owns the environment: today the user's playground.
 func (h *Handler) createContentTerminalTicket(c *gin.Context, target environmentContentTarget, contentID string) {
 	user := h.requireUser(c)
 	if user == nil {
@@ -36,7 +35,7 @@ func (h *Handler) createContentTerminalTicket(c *gin.Context, target environment
 		c.JSON(http.StatusBadRequest, api.ErrorResponse{Error: err.Error()})
 		return
 	}
-	env, err := h.findEnvironment(c.Request.Context(), user.ID, target)
+	env, err := h.findPlaygroundEnvironment(c.Request.Context(), user.ID, target)
 	if err != nil || env == nil || env.UID == "" || !terminalEnvironmentReady(env, h.nodeTerminal) {
 		if err == nil || errors.Is(err, errNoMatchingEnvironment) {
 			c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this content"})
@@ -94,7 +93,15 @@ func (h *Handler) handleContentTerminalTicket(c *gin.Context, target environment
 		c.JSON(http.StatusNotFound, api.ErrorResponse{Error: "no active environment for this content"})
 		return
 	}
-	if env.UID != ticket.EnvironmentUID || env.ScenarioRef != contentID || env.SourceRevision != target.revisionID {
+	if target.kind == environmentContentPlayground {
+		// The playground has no content identity to compare: the ticket
+		// fences on the environment UID, and the session must still be the
+		// user's blank one under its deterministic name.
+		if !env.Blank || env.Name != playgroundEnvironmentName(ticket.UserID) {
+			c.JSON(http.StatusConflict, api.ErrorResponse{Error: "terminal environment has changed"})
+			return
+		}
+	} else if env.UID != ticket.EnvironmentUID || env.ScenarioRef != contentID || env.SourceRevision != target.revisionID {
 		c.JSON(http.StatusConflict, api.ErrorResponse{Error: "terminal environment has changed"})
 		return
 	}
