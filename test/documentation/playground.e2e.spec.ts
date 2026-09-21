@@ -35,6 +35,22 @@ async function playgroundState(request: APIRequestContext, token: string): Promi
   return (await response.json()) as PlaygroundState;
 }
 
+// Registers through the API alone: the capacity leg needs a second identity,
+// not a second browser session. The TOTP code is derived in the page context
+// to reuse the same in-browser generator the UI login uses.
+async function registerApiUser(page: Page, request: APIRequestContext): Promise<string> {
+  const username = `playground-second-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const password = "test-password-123";
+  const registerResponse = await request.post(`${apiBase}/api/auth/register`, { data: { username, password } });
+  expect(registerResponse.status(), await registerResponse.text()).toBe(201);
+  const registration = (await registerResponse.json()) as { totp_secret: string };
+  const loginResponse = await request.post(`${apiBase}/api/auth/login`, {
+    data: { username, password, totp_code: await totpCode(page, registration.totp_secret) },
+  });
+  expect(loginResponse.status(), await loginResponse.text()).toBe(200);
+  return ((await loginResponse.json()) as { token: string }).token;
+}
+
 const ball = (page: Page) => page.locator("button.playground-fab");
 
 async function expectBallState(page: Page, state: "none" | "ready", timeout = 15 * 60_000) {
@@ -84,9 +100,35 @@ test("the user drives one playground through create, terminal, reset, and close"
   await expectBallState(page, "ready");
   await expect(page.locator(".terminal-status").getByText("Connected", { exact: true })).toBeVisible({ timeout: 90_000 });
 
+  // The prepared target pins playground.max_active to 1: while this session
+  // occupies the only slot, a second user's create is rejected and their
+  // session stays none. Reads stay ungated for everyone.
+  const secondToken = await registerApiUser(page, request);
+  const rejected = await request.post(`${apiBase}/api/playground`, {
+    headers: { Authorization: `Bearer ${secondToken}` },
+  });
+  expect(rejected.status(), await rejected.text()).toBe(429);
+  expect((await playgroundState(request, secondToken)).state).toBe("none");
+
   // Close releases the environment; the ball returns to none and the API
   // agrees. The same user may start a fresh session afterwards.
   await panel.getByRole("button", { name: "Close", exact: true }).click();
   await expectBallState(page, "none", 5 * 60_000);
   await expect.poll(async () => (await playgroundState(request, token)).state, { timeout: 60_000 }).toBe("none");
+
+  // The prepare reset leaves a fresh database, so the suite's first account is
+  // the bootstrap admin: the environment console renders against the live
+  // endpoints, and the overview card shows the cap this target configured.
+  const role = await page.evaluate(() => {
+    const payload = (localStorage.getItem("token") ?? "").split(".")[1] ?? "";
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    if (!normalized) return "";
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    return (JSON.parse(atob(padded)) as { role?: string }).role ?? "";
+  });
+  expect(role).toBe("admin");
+  await page.getByRole("button", { name: "管理", exact: true }).click();
+  await page.getByRole("navigation", { name: "Admin sections" }).getByRole("button", { name: "环境", exact: true }).first().click();
+  await expect(page.getByRole("heading", { name: "环境观测" }).first()).toBeVisible();
+  await expect(page.locator(".admin-overview-card").first()).toContainText("/ 1", { timeout: 30_000 });
 });

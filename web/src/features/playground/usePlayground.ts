@@ -60,6 +60,10 @@ export function usePlayground(notify: Notify) {
     adopt(environment);
     if (epoch !== pollEpoch) return;
     if (state.value === "ready" && resetWipePending) {
+      // The pre-wipe read is stale by design: the POST already committed to a
+      // wipe, so the ball keeps showing creating instead of flashing the old
+      // Ready session back for one poll interval.
+      state.value = "creating";
       pollTimer = window.setTimeout(() => void pollOnce(epoch), pollInterval);
       return;
     }

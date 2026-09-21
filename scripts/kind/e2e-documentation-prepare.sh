@@ -111,8 +111,12 @@ config_name=$(kubectl -n "$namespace" get deployment breakfix-server -o json |
 [ -n "$config_name" ] || fail "Breakfix Server deployment has no config ConfigMap volume"
 config=$(kubectl -n "$namespace" get configmap "$config_name" -o json | jq -r '.data["config.yaml"]')
 [ -n "$config" ] && [ "$config" != "null" ] || fail "config ConfigMap $config_name has no config.yaml"
+# The playground capacity gate is pinned to a single concurrent session: the
+# suite's second user must be rejected while the first session occupies the
+# only slot. The value stays a quoted string — the config parser expects one.
 config=$(printf '%s\n' "$config" | sed \
-	-e 's#^  library_root: .*#  library_root: /var/lib/breakfix/documentation/library#')
+	-e 's#^  library_root: .*#  library_root: /var/lib/breakfix/documentation/library#' \
+	-e 's#^  max_active: .*#  max_active: "1"#')
 kubectl -n "$namespace" patch configmap "$config_name" --type merge --patch "$(jq -cn --arg config "$config" '{data:{"config.yaml":$config}}')" >/dev/null
 
 # The blank practice scenario needs no model credential: the documentation

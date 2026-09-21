@@ -86,10 +86,12 @@ describe("PlaygroundDock", () => {
 			await flushPromises();
 
 			// The controller has not picked the nonce up yet: the first GET
-			// still reads the pre-reset Ready. The loop must continue.
+			// still reads the pre-reset Ready. The loop must continue and the
+			// ball must not flash the old session back as ready.
 			vi.mocked(api.getPlayground).mockResolvedValue(environmentAt("ready"));
 			await vi.advanceTimersByTimeAsync(2_100);
 			await flushPromises();
+			expect(wrapper.get("button.playground-fab").attributes("data-state")).toBe("creating");
 			vi.mocked(api.getPlayground).mockClear();
 
 			await vi.advanceTimersByTimeAsync(2_100);
