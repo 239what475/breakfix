@@ -1,14 +1,12 @@
 import type {
 	DocumentationPageResponse,
-	DocumentationPracticeDetail,
-	DocumentationPracticesResponse,
+	DocumentationScenarioEnvironment,
 	DocumentationTreeResponse,
 } from "../../api/generated";
 
 // Small-scale mirrors of the pinned library fixtures the E2E reader walks:
-// the outline path down to the pod-lifecycle page, a page whose markdown
-// carries the generated content shapes (heading anchor, alert, code fence),
-// and the frozen practice projection published on its anchor.
+// the outline path down to the pod-lifecycle page and a page whose markdown
+// carries the generated content shapes (heading anchor, alert, code fence).
 
 export const treeRoots: DocumentationTreeResponse = {
 	nodes: [{ title: "Concepts", path: "/docs/concepts", has_children: true }],
@@ -70,17 +68,22 @@ export const podLifecyclePage: DocumentationPageResponse = {
 	assets: [],
 };
 
-export const practiceIndex: DocumentationPracticesResponse = {
-	digest: "sha256:fixture-practices",
-	practices: [{ anchor: "pod-lifetime", practice_id: "document-practice-pod-lifetime", title: "Observe Pod lifetime" }],
+export const scenarioNone: DocumentationScenarioEnvironment = { state: "none" };
+
+export const scenarioCreating: DocumentationScenarioEnvironment = {
+	state: "creating",
+	environment_id: "environment-1",
+	runtime: "k8s",
 };
 
-export const practiceProjection: DocumentationPracticeDetail = {
-	id: "document-practice-pod-lifetime",
-	title: "Observe Pod lifetime",
-	objective: "Observe a Pod reach Running",
-	boundary: "One Pod in the fixed Kubernetes environment",
-	steps: ["Create the Pod and observe its phase"],
-	observations: ["The Pod reaches the Running phase"],
-	runtime: { name: "k8s", base_image: "breakfix-k8s-base:dev" },
+export const scenarioReady: DocumentationScenarioEnvironment = {
+	state: "ready",
+	environment_id: "environment-1",
+	runtime: "k8s",
+};
+
+export const scenarioFailed: DocumentationScenarioEnvironment = {
+	state: "failed",
+	environment_id: "environment-1",
+	runtime: "k8s",
 };

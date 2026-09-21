@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api/client";
 import { automockApi } from "../../test/client-mock";
 import DocumentationPage from "./DocumentationPage.vue";
-import { podLifecyclePage, podLifecyclePath, practiceIndex, practiceProjection, treeAt } from "./fixtures";
+import { podLifecyclePage, podLifecyclePath, scenarioNone, scenarioReady, treeAt } from "./fixtures";
 
 vi.mock("../../api/client", async (importOriginal) => {
 	const { automockApi } = await import("../../test/client-mock");
@@ -80,15 +80,16 @@ describe("DocumentationPage", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		window.history.replaceState({}, "", entryUrl);
+		localStorage.setItem("token", "reader-token");
 		vi.stubGlobal("IntersectionObserver", IntersectionObserverStub);
 		vi.mocked(api.getDocumentationTree).mockImplementation(async (path?: string) => treeAt(path));
 		vi.mocked(api.getDocumentationPage).mockResolvedValue(podLifecyclePage);
-		vi.mocked(api.getDocumentationPractices).mockResolvedValue({ digest: "sha256:none", practices: [] });
-		vi.mocked(api.getDocumentationPractice).mockResolvedValue(practiceProjection);
+		vi.mocked(api.getDocumentationScenario).mockResolvedValue(scenarioNone);
 	});
 
 	afterEach(() => {
 		wrapper?.unmount();
+		localStorage.removeItem("token");
 		vi.unstubAllGlobals();
 	});
 
@@ -161,38 +162,38 @@ describe("DocumentationPage", () => {
 		expect(window.location.search).toContain("hash=pod-lifetime");
 	});
 
-	it("anchors exactly one practice entry and swaps the reader layout", async () => {
+	it("carries the blank scenario session in the page rail", async () => {
 		window.history.replaceState({}, "", podLifecycleUrl);
-		vi.mocked(api.getDocumentationPractices).mockResolvedValue(practiceIndex);
+		vi.mocked(api.getDocumentationScenario).mockResolvedValue(scenarioReady);
 		wrapper = mountReader();
 		await waitForArticle(wrapper);
 
-		const article = wrapper.get(".documentation-article");
-		// The anchor buttons are decorated after the practice index lands.
-		await vi.waitFor(() => {
-			if (article.findAll(".practice-anchor-button").length !== 1) throw new Error("practice anchor not decorated yet");
-		}, { timeout: 5_000 });
-		expect(article.get("h2#pod-lifetime .practice-anchor-button").attributes("aria-label")).toBe("Start practice: Observe Pod lifetime");
+		// The toolbar reflects the shared session state on every page.
+		const toolbar = wrapper.get("aside.scenario-toolbar");
+		expect(toolbar.get(".scenario-toolbar-badge").text()).toBe("Ready");
+		expect(toolbar.get('button[aria-label="Create blank scenario"]').attributes("disabled")).toBeDefined();
+		expect(toolbar.get('button[aria-label="Reset blank scenario"]').attributes("disabled")).toBeUndefined();
+		expect(toolbar.get('button[aria-label="Close blank scenario"]').attributes("disabled")).toBeUndefined();
 
 		const reader = wrapper.get(".documentation-reader");
-		expect(reader.classes()).not.toContain("practice-open");
-
-		(article.element.querySelector("#pod-lifetime .practice-anchor-button") as HTMLElement).click();
-		await flushPromises();
-
-		// Anonymous entry asks for a login while the frozen projection loads.
-		expect(wrapper.emitted("request-auth")).toHaveLength(1);
-		expect(reader.classes()).toContain("practice-open");
-		expect(reader.classes()).toContain("toc-collapsed");
-		const panel = wrapper.get(".practice-panel");
-		expect(panel.text()).toContain("Observe Pod lifetime");
-		expect(panel.text()).toContain("Observe a Pod reach Running");
-		expect(panel.text()).toContain("One Pod in the fixed Kubernetes environment");
+		expect(reader.classes()).toContain("scenario-open");
+		const panel = wrapper.get(".scenario-panel");
+		expect(panel.text()).toContain("Blank scenario");
+		expect(panel.find(".scenario-panel-terminal").exists()).toBe(true);
 
 		await panel.get('button[aria-label="Close practice panel"]').trigger("click");
 		await flushPromises();
-		expect(wrapper.find(".practice-panel").exists()).toBe(false);
-		expect(reader.classes()).not.toContain("practice-open");
-		expect(reader.classes()).not.toContain("toc-collapsed");
+		expect(api.closeDocumentationScenario).toHaveBeenCalled();
+	});
+
+	it("asks for a login before creating the blank scenario anonymously", async () => {
+		window.history.replaceState({}, "", podLifecycleUrl);
+		localStorage.removeItem("token");
+		wrapper = mountReader();
+		await waitForArticle(wrapper);
+
+		await wrapper.get('button[aria-label="Create blank scenario"]').trigger("click");
+		expect(wrapper.emitted("request-auth")).toHaveLength(1);
+		expect(api.createDocumentationScenario).not.toHaveBeenCalled();
 	});
 });

@@ -2,12 +2,13 @@
 import { PanelLeftClose, PanelLeftOpen, RefreshCw } from "lucide-vue-next";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { api } from "../../api/client";
-import type { DocumentationPageResponse, DocumentationPracticeDetail, DocumentationPracticeSummary } from "../../api/generated";
+import type { DocumentationPageResponse } from "../../api/generated";
 import { documentationSource, libraryPathOf, urlPathOf } from "./documentation";
 import { renderDocumentMarkdown } from "./markdown";
 import DocumentationToc, { type TreeEntry } from "./DocumentationToc.vue";
-import PracticePanel from "./PracticePanel.vue";
-import { usePracticeSession } from "./usePracticeSession";
+import BlankScenarioToolbar from "./BlankScenarioToolbar.vue";
+import BlankScenarioPanel from "./BlankScenarioPanel.vue";
+import { useBlankScenario } from "./useBlankScenario";
 import "./documentation.css";
 
 const props = defineProps<{ authSignal?: number }>();
@@ -29,40 +30,15 @@ const tocOpen = ref(false);
 const tocCollapsed = ref(false);
 const article = ref<HTMLElement>();
 
-// The practice line: one published practice can hang from a heading anchor.
-// Opening it collapses the outline into the reader's reserved rail slot, and
-// closing it restores the outline exactly as the reader left it.
-const practices = ref<DocumentationPracticeSummary[]>([]);
-const activePracticeAnchor = ref<string | null>(null);
-const practiceDetail = ref<DocumentationPracticeDetail | null>(null);
-const practiceDetailLoading = ref(false);
-const practiceDetailFailed = ref(false);
-const tocCollapsedBeforePractice = ref<boolean | null>(null);
-
-const practiceOpen = computed(() => activePracticeAnchor.value !== null);
-
-const activePracticeId = computed(
-  () => practices.value.find((item) => item.anchor === activePracticeAnchor.value)?.practice_id ?? null,
-);
-
-// Clicking the anchor is the session entry: it starts (or resumes) the
-// temporary environment, the panel polls the phase while it prepares, and the
-// terminal attaches once it is Ready. Anonymous readers continue after login.
+// The practice ground is page-independent: one blank scenario per reader on
+// the pinned library, driven from the right-side toolbar and shared by every
+// documentation page.
 const notify = (text: string, kind?: "error" | "info") => emit("notice", text, kind);
-const practiceSession = usePracticeSession(notify, () => emit("request-auth"));
-const {
-  phase: sessionPhase,
-  starting: sessionStarting,
-  stopping: sessionStopping,
-  resetting: sessionResetting,
-  environmentReady: sessionEnvironmentReady,
-  runtime: sessionRuntime,
-  nodes: sessionNodes,
-} = practiceSession;
+const scenario = useBlankScenario(notify, () => emit("request-auth"));
 
 watch(
   () => props.authSignal,
-  () => void practiceSession.resumeAfterAuth(),
+  () => void scenario.resumeAfterAuth(),
 );
 
 const currentLibraryPath = computed(() => libraryPathOf(current.value.path));
@@ -108,7 +84,6 @@ function readLocation() {
 
 async function loadPage(scrollHash: string) {
   const libraryPath = currentLibraryPath.value;
-  resetPracticeState();
   if (!libraryPath || libraryPath === "docs") {
     // A section root is not a page: keep the location and show the outline.
     page.value = null;
@@ -127,14 +102,6 @@ async function loadPage(scrollHash: string) {
   } catch {
     loading.value = false;
     failed.value = true;
-  }
-  // The practice index is a per-page pull; a reader without a published
-  // practice simply renders none, so failures stay silent here.
-  try {
-    const practiceList = await api.getDocumentationPractices(libraryPath);
-    if (currentLibraryPath.value === libraryPath) practices.value = practiceList.practices;
-  } catch {
-    practices.value = [];
   }
 }
 
@@ -212,96 +179,6 @@ function handlePopState() {
   void loadPage(current.value.hash);
 }
 
-// The practice entry rides the rendered headings: one anchor button per
-// published practice, inserted after the markdown lands in the article and
-// re-inserted whenever the rendered body is replaced.
-function decoratePracticeHeadings() {
-  const container = article.value;
-  if (!container) return;
-  container.querySelectorAll(".practice-anchor-button").forEach((button) => button.remove());
-  for (const practice of practices.value) {
-    const heading = container.querySelector(`[id="${CSS.escape(practice.anchor)}"]`);
-    if (!heading || heading.querySelector(".practice-anchor-button")) continue;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "practice-anchor-button";
-    button.dataset.anchor = practice.anchor;
-    button.setAttribute("aria-label", `Start practice: ${practice.title}`);
-    button.title = practice.title;
-    button.textContent = "Practice";
-    heading.appendChild(button);
-  }
-}
-
-function scrollHeadingIntoView(anchor: string) {
-  const target = article.value?.querySelector(`[id="${CSS.escape(anchor)}"]`);
-  target?.scrollIntoView({ block: "start" });
-}
-
-function handleArticleClick(event: MouseEvent) {
-  const button = (event.target as HTMLElement | null)?.closest?.(".practice-anchor-button");
-  if (!(button instanceof HTMLElement)) return;
-  const anchor = button.getAttribute("data-anchor");
-  if (anchor) void openPractice(anchor);
-}
-
-async function openPractice(anchor: string) {
-  const summary = practices.value.find((item) => item.anchor === anchor);
-  if (!summary || activePracticeAnchor.value === anchor) return;
-  activePracticeAnchor.value = anchor;
-  practiceDetail.value = null;
-  practiceDetailFailed.value = false;
-  // The outline gives its column to the practice rail; the reader restores
-  // the original outline state when the panel closes.
-  if (tocCollapsedBeforePractice.value === null) tocCollapsedBeforePractice.value = tocCollapsed.value;
-  tocCollapsed.value = true;
-  await nextTick();
-  scrollHeadingIntoView(anchor);
-  practiceDetailLoading.value = true;
-  // Clicking the anchor is the session entry: start (or resume) while the
-  // projection loads. Auth-gated starts resume once the login lands.
-  practiceSession.startFor(summary.practice_id);
-  try {
-    const detail = await api.getDocumentationPractice(summary.practice_id);
-    if (activePracticeAnchor.value !== anchor) return;
-    practiceDetail.value = detail;
-    practiceDetailLoading.value = false;
-  } catch {
-    if (activePracticeAnchor.value !== anchor) return;
-    practiceDetailLoading.value = false;
-    practiceDetailFailed.value = true;
-  }
-}
-
-async function closePractice() {
-  const anchor = activePracticeAnchor.value;
-  if (anchor === null) return;
-  activePracticeAnchor.value = null;
-  practiceDetail.value = null;
-  practiceDetailFailed.value = false;
-  // Closing only detaches: the terminal disconnects with the panel and the
-  // environment is reclaimed by its idle TTL.
-  practiceSession.detach();
-  if (tocCollapsedBeforePractice.value !== null) {
-    tocCollapsed.value = tocCollapsedBeforePractice.value;
-    tocCollapsedBeforePractice.value = null;
-  }
-  await nextTick();
-  scrollHeadingIntoView(anchor);
-}
-
-function resetPracticeState() {
-  activePracticeAnchor.value = null;
-  practiceDetail.value = null;
-  practiceDetailLoading.value = false;
-  practiceDetailFailed.value = false;
-  practices.value = [];
-  if (tocCollapsedBeforePractice.value !== null) {
-    tocCollapsed.value = tocCollapsedBeforePractice.value;
-    tocCollapsedBeforePractice.value = null;
-  }
-}
-
 let observer: IntersectionObserver | undefined;
 
 function observeHeadings() {
@@ -328,14 +205,10 @@ watch(body, async () => {
   observeHeadings();
 });
 
-watch([body, practices], async () => {
-  await nextTick();
-  decoratePracticeHeadings();
-});
-
 readLocation();
 void loadTreeRoots();
 void loadPage(current.value.hash);
+void scenario.refresh();
 window.addEventListener("popstate", handlePopState);
 onUnmounted(() => {
   window.removeEventListener("popstate", handlePopState);
@@ -345,9 +218,9 @@ onUnmounted(() => {
 
 <template>
   <section class="documentation-page" aria-label="Kubernetes documentation">
-    <!-- The grid reserves a right column for the practice rail; opening a
-         practice collapses the outline and renders the panel in the rail. -->
-    <div class="documentation-reader" :class="{ 'toc-collapsed': tocCollapsed, 'practice-open': practiceOpen }">
+    <!-- The grid reserves a rail column for the blank practice panel plus a
+         slim vertical toolbar on the right edge, shared by every page. -->
+    <div class="documentation-reader" :class="{ 'toc-collapsed': tocCollapsed, 'scenario-open': scenario.sessionOpen.value }">
       <button
         class="compact-button documentation-toc-toggle"
         type="button"
@@ -385,36 +258,36 @@ onUnmounted(() => {
           </button>
         </div>
         <!-- Rendered from library markdown with html:false; all markup comes
-             from markdown-it's own rules plus classed wrappers. The practice
-             anchor buttons are attached after render, never by the parser. -->
+             from markdown-it's own rules plus classed wrappers. -->
         <!-- eslint-disable-next-line vue/no-v-html -->
-        <article v-else-if="page" ref="article" class="documentation-article" @click="handleArticleClick" v-html="body"></article>
+        <article v-else-if="page" ref="article" class="documentation-article" v-html="body"></article>
         <div v-else class="documentation-empty">
           <h2>Documentation</h2>
           <p>Choose a page from the outline to start reading.</p>
         </div>
       </div>
       <div class="documentation-rail">
-        <PracticePanel
-          v-if="practiceOpen && activePracticeId"
-          :practice-id="activePracticeId"
-          :detail="practiceDetail"
-          :loading="practiceDetailLoading"
-          :failed="practiceDetailFailed"
-          :session-active="sessionEnvironmentReady"
-          :starting="sessionStarting"
-          :stopping="sessionStopping"
-          :resetting="sessionResetting"
-          :ready="sessionEnvironmentReady"
-          :phase="sessionPhase"
-          :runtime="sessionRuntime"
-          :nodes="sessionNodes"
-          @close="closePractice"
-          @start="activePracticeId && practiceSession.start(activePracticeId)"
-          @stop="practiceSession.stop()"
-          @reset="practiceSession.reset()"
+        <BlankScenarioPanel
+          v-if="scenario.sessionOpen.value"
+          :state="scenario.state.value"
+          :starting="scenario.starting.value"
+          :stopping="scenario.stopping.value"
+          :resetting="scenario.resetting.value"
+          :runtime="scenario.runtime.value"
+          @create="scenario.createFor()"
+          @reset="scenario.reset()"
+          @close="scenario.close()"
         />
       </div>
+      <BlankScenarioToolbar
+        :state="scenario.state.value"
+        :starting="scenario.starting.value"
+        :stopping="scenario.stopping.value"
+        :resetting="scenario.resetting.value"
+        @create="scenario.createFor()"
+        @reset="scenario.reset()"
+        @close="scenario.close()"
+      />
     </div>
   </section>
 </template>

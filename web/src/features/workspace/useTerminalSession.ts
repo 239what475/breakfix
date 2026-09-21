@@ -44,6 +44,19 @@ export function practiceTerminalChannel(practiceId: string): TerminalChannel {
   };
 }
 
+// The blank practice scenario is one session per reader: its terminal rides
+// fixed paths with no content identifier.
+export function blankScenarioTerminalChannel(): TerminalChannel {
+  return {
+    ticket: (window, node) =>
+      api
+        .createBlankScenarioTerminalTicket(window, node)
+        .then((response) => response.ticket),
+    socket: (window, ticket, node) =>
+      terminalSocketURL("/api/documentation/scenario/terminal", window, ticket, node),
+  };
+}
+
 export function useTerminalSession(
   host: Readonly<Ref<HTMLDivElement | undefined>>,
   channel: Readonly<Ref<TerminalChannel | null>>,
