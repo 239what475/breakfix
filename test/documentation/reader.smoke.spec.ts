@@ -14,8 +14,8 @@ async function gotoReader(page: Page, readerUrl: string) {
 // Thin smoke of what only a real browser can carry: the generated content
 // contract produced by the external docs-project generator and the
 // viewport-driven outline drawer. Navigation, URL/hash sync, retries, and the
-// blank scenario session behavior live in the vitest reader tier and the
-// scenario e2e suite.
+// playground session behavior live in the vitest reader tier and the
+// playground e2e suite.
 test("the reader renders the generated corpus and moves the outline by viewport", async ({ page }) => {
   test.setTimeout(3 * 60_000);
 
@@ -34,18 +34,19 @@ test("the reader renders the generated corpus and moves the outline by viewport"
   await expect(article.locator("blockquote.doc-alert-note").first()).toBeVisible();
   await expect(article.locator("blockquote.doc-alert-caution").first()).toBeVisible();
   await expect(article.locator("pre.shiki").first()).toBeVisible();
-  // The anonymous toolbar is present but inert without a session.
-  await expect(page.locator(".scenario-toolbar-badge")).toHaveText("No scenario");
+  // The reader carries no scenario surfaces anymore; an anonymous visitor
+  // gets no playground ball and no request fires.
+  await expect(page.locator("button.playground-fab")).toHaveCount(0);
 
-  // Mobile viewport: the toolbar disappears and the outline moves into the
-  // menu drawer.
+  // Mobile viewport: the outline moves into the menu drawer; the ball stays
+  // absent for the anonymous visitor.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
   await expect(page.locator(".documentation-article")).toBeVisible();
-  await expect(page.locator(".scenario-toolbar")).toBeHidden();
+  await expect(page.locator("button.playground-fab")).toHaveCount(0);
   await page.getByRole("button", { name: "Contents", exact: true }).click();
   await expect(page.getByRole("navigation", { name: "Documentation outline" })).toBeVisible();
-  await page.getByRole("button", { name: "Close documentation outline" }).click();
+  await page.getByRole("button", { name: "Close documentation outline", exact: true }).click();
   await expect(page.getByRole("navigation", { name: "Documentation outline" })).not.toBeVisible();
 
   // The app shell's mobile menu still routes into the reader.

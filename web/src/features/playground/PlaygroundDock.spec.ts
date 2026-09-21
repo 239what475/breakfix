@@ -73,6 +73,44 @@ describe("PlaygroundDock", () => {
 		}
 	});
 
+	it("does not trust a ready read that predates the reset wipe", async () => {
+		vi.useFakeTimers();
+		try {
+			vi.mocked(api.getPlayground).mockResolvedValue(environmentAt("ready"));
+			const wrapper = mount(PlaygroundDock, {});
+			await flushPromises();
+			await wrapper.get("button.playground-fab").trigger("click");
+
+			vi.mocked(api.resetPlayground).mockResolvedValue(environmentAt("creating"));
+			await verb(wrapper, "Reset")!.trigger("click");
+			await flushPromises();
+
+			// The controller has not picked the nonce up yet: the first GET
+			// still reads the pre-reset Ready. The loop must continue.
+			vi.mocked(api.getPlayground).mockResolvedValue(environmentAt("ready"));
+			await vi.advanceTimersByTimeAsync(2_100);
+			await flushPromises();
+			vi.mocked(api.getPlayground).mockClear();
+
+			await vi.advanceTimersByTimeAsync(2_100);
+			expect(api.getPlayground).toHaveBeenCalled();
+
+			// Once a GET observes creating, the ready that follows is final
+			// and the loop settles.
+			vi.mocked(api.getPlayground).mockResolvedValue(environmentAt("creating"));
+			await vi.advanceTimersByTimeAsync(2_100);
+			vi.mocked(api.getPlayground).mockResolvedValue(environmentAt("ready"));
+			await vi.advanceTimersByTimeAsync(2_100);
+			await flushPromises();
+			const settled = vi.mocked(api.getPlayground).mock.calls.length;
+			await vi.advanceTimersByTimeAsync(6_500);
+			expect(vi.mocked(api.getPlayground).mock.calls.length).toBe(settled);
+			expect(wrapper.get("button.playground-fab").attributes("data-state")).toBe("ready");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("enables create from none without reset or close", async () => {
 		const wrapper = await dockAt("none");
 		expect(verb(wrapper, "Create")?.attributes("disabled")).toBeUndefined();

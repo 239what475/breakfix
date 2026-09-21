@@ -35,6 +35,12 @@ export function usePlayground(notify: Notify) {
 
   const sessionOpen = computed(() => state.value !== "none");
 
+  // A reset POST reports creating optimistically while the controller has not
+  // picked the nonce up yet: the first GET may still read the pre-reset
+  // Ready and would stop the poll loop before the wipe happens. Until some
+  // GET observes creating, a ready read after a reset is not final.
+  let resetWipePending = false;
+
   function stopPolling() {
     pollEpoch += 1;
     if (pollTimer !== undefined) {
@@ -53,7 +59,12 @@ export function usePlayground(notify: Notify) {
   function adoptAndSchedule(environment: PlaygroundEnvironment, epoch: number) {
     adopt(environment);
     if (epoch !== pollEpoch) return;
+    if (state.value === "ready" && resetWipePending) {
+      pollTimer = window.setTimeout(() => void pollOnce(epoch), pollInterval);
+      return;
+    }
     if (state.value === "creating") {
+      resetWipePending = false;
       pollTimer = window.setTimeout(() => void pollOnce(epoch), pollInterval);
     }
   }
@@ -104,7 +115,12 @@ export function usePlayground(notify: Notify) {
     try {
       const environment = await api.resetPlayground();
       if (epoch !== pollEpoch) return;
-      adoptAndSchedule(environment, epoch);
+      // The POST response is the optimistic projection above, not an
+      // observation: only a GET that reads creating proves the controller
+      // picked the wipe up, so the schedule starts with the flag armed.
+      resetWipePending = true;
+      adopt(environment);
+      pollTimer = window.setTimeout(() => void pollOnce(epoch), pollInterval);
       notify("Playground reset.", "info");
     } catch (error) {
       if (epoch !== pollEpoch) return;

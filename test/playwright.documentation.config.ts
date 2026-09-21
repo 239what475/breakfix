@@ -13,10 +13,10 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    // The blank scenario drives one real vk8s environment per reader through
+    // The playground drives one real vk8s environment per user through
     // create, terminal, reset, and close; it stays on one worker because the
     // environment is the user's single session.
-    { name: "scenario-e2e", testMatch: /scenario\.e2e\.spec\.ts$/, workers: 1, timeout: 30 * 60_000 },
+    { name: "playground-e2e", testMatch: /playground\.e2e\.spec\.ts$/, workers: 1, timeout: 30 * 60_000 },
     // Thin reader smoke: the generated content contract from the external
     // docs-project generator plus the viewport-driven surfaces.
     { name: "reader-smoke", testMatch: /reader\.smoke\.spec\.ts$/ },

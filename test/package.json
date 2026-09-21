@@ -12,7 +12,7 @@
     "test:e2e:recovery": "playwright test -c playwright.recovery.config.ts",
     "test:e2e:documentation": "playwright test -c playwright.documentation.config.ts",
     "test:e2e:documentation:reader": "playwright test -c playwright.documentation.config.ts --project=reader-smoke",
-    "test:e2e:documentation:scenario": "playwright test -c playwright.documentation.config.ts --project=scenario-e2e",
+    "test:e2e:documentation:playground": "playwright test -c playwright.documentation.config.ts --project=playground-e2e",
     "test:acceptance:node": "playwright test -c playwright.agent-live.config.ts authoring.node.live.spec.ts",
     "test:acceptance:mcp": "playwright test -c playwright.agent-live.config.ts authoring.mcp.live.spec.ts",
     "test:acceptance:interruption": "playwright test -c playwright.agent-live.config.ts authoring.interruption.live.spec.ts",
