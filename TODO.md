@@ -1,8 +1,8 @@
 # TODO
 
-已完成的阶段见 git 历史(最近:死信 reap 退场 ffd5c44..本提交——失败一律封顶退避重试,
-永不放弃目标;交付记录与验收证据见本提交的 TODO 收口章)。当前阶段:动作队列诚实失败。
-本文件保留当前阶段计划、未立项事项与挂起决策。
+已完成的阶段见 git 历史(最近:队列两阶段——死信 reap 退场与动作队列诚实失败,均于
+2026-09-22 单提交交付;交付记录与验收证据见各自提交的 TODO 收口章)。本文件保留未立项
+事项与挂起决策。
 
 ## 阶段:死信 reap 退场——封顶退避,永不放弃目标(2026-09-22 交付)
 
@@ -36,83 +36,62 @@
   300s;attempt 无上限仍回到 queued。
 - 未排 e2e:无新集群侧行为契约,快车道+PG 门控足够(与计划一致)。
 
-## 阶段:动作队列诚实失败——退避、显式耗尽、失败传导
+## 阶段:动作队列诚实失败——退避、显式耗尽、失败传导(2026-09-22 交付)
 
-### 定案
+### 交付记录
 
-runnable_actions 的缺陷是一条三环链(均已核实):
-
-- **韧性窗口约 5 秒**:基础设施类失败写死 `next_run_at = now+1s` 平坦回队
-  (runnable_repository.go `ReportRunnableActionFailure`),claim 扫描又有
-  `attempt < 5` 截断(:222)——provider 抖 10 秒,在飞动作全部烧光重试预算;
-- **耗尽即静默楔死**:行停留在 `queued`,永不再被认领,无终态转移无可见性(读起来像
-  "排队中");且动作 key 由内容身份确定性派生、INSERT `ON CONFLICT DO NOTHING`,重调度
-  永不重置——catalog 重装命中同一行,条目被永久毒化;
-- **失败传导缺口(比前两环更根本)**:两个 resolver 都把 failed 与 pending 观察成同一个
-  "还没好"——验证侧只按 record ID 查报告表,动作行根本不在查询里;物化侧虽 join 动作行
-  但 WHERE 只匹配 `state='completed'`,failed 同样落进 `ErrMaterializationNotReady`。
-  不仅楔死行,今天连显式 failed 的动作都会让工作流停在 Verifying、让 catalog 安装无限
-  等待。
-
-与 reap 的哲学对照决定方向:reap 之上没有任何角色能对失败做出反应,所以只能永不放弃;
-动作之上有能反应的角色——生成工作流有 `StateFailed` 终态(workflow.go:37),catalog 安装
-有既有 `FailRelease` 出口——所以诚实的设计是**有界耐心 + 显式失败**(k8s
-progressDeadlineSeconds 模式),而非照搬无限重试。
-
-归因两分是本阶段的判定轴:**内容之过**(artifact 类)不重试、失败结果缓存(fail-fast
-重装是特性);**世界之过**(infrastructure 类)退避重试、耗尽显式转 failed、重调度可
-自愈。验证报告携带 artifact 失败即动作 completed(失败是被记录的合法结果)——这条既有
-诚实路径不动。
-
-到期归因随此定案:执行 context 到期(被 `CreateTimeoutSeconds`/`MaxLifetimeSeconds`
-砍掉)目前在 `reportFailure` 默认归 infrastructure(runner.go:186-190)——改为归
-artifact:场景在自身批准期限内跑不完按内容之过处理,一次完成失败。否则 infra 重试会把
-最坏耐心放大成尝试数 × 执行期限的乘积。
-
-边界:单次执行的期限围栏、租约与续租、lease 过期回收、`runnerRetryDelay` 的 worker 主
-循环节奏全部不动。
-
-### 任务
-
-- **重试与耗尽(postgres/runnable_repository.go)**:`ReportRunnableActionFailure` 的
-  infra 分支按 attempt 指数退避(与 reap 共用同一形状,抽共享 helper:5s 起倍增、5 分钟
-  封顶;上限建议 8 次,总耐心约一刻钟量级,实现时定);attempt 达上限时不再回队,同租约
-  围栏内写 `state='failed'、failure_class='infrastructure'、
-  failure_code='attempts-exhausted'`;`ClaimRunnableAction` 删 `AND attempt < ?` 截断
-  ——耗尽由失败汇报显式转移,不再由扫描静默跳过。
-- **重调度语义**:`ScheduleMaterialization`/`ScheduleVerification` 的 `ON CONFLICT` 由
-  纯 `DO NOTHING` 改为条件 `DO UPDATE`:仅当现有行 `state='failed' AND
-  failure_class='infrastructure'` 时重置 queued、attempt=0、清空 failure 三列;
-  artifact 失败原样保留。
-- **到期归因(worker/runnable/runner.go)**:`reportFailure` 将 `context.DeadlineExceeded`
-  归为 artifact(code=`execution-deadline-exceeded`),不进 infra 重试。
+- **共享退避曲线(domain/runnable/backoff.go)**:`RetryBackoff(base, attempt)`——5s 起倍增、
+  `RetryBackoffCap`=5 分钟封顶;reaper 删本地 `reaperRetryDelay` 改用共享曲线,动作队列
+  同曲线,平台一条耐心曲线两个消费者。
+- **重试与耗尽(postgres/runnable_repository.go)**:`ReportRunnableActionFailure` 改事务
+  实现——FOR UPDATE 锁行读 attempt,infra 分支按 `RetryBackoff(5s, attempt)` 回队并保留
+  诊断;attempt 达 `runnableActionMaxAttempts=8` 时不再回队,写显式
+  `state='failed'/failure_class='infrastructure'/failure_code='attempts-exhausted'`
+  (调用方 summary 作为最后错误保留);artifact 失败照旧一次转 failed。退避间隔合计
+  615s(5+10+20+40+80+160+300),最坏耐心为 8 次执行期限 + 615s。`ClaimRunnableAction`
+  删 `AND attempt < ?` 截断——耗尽只由失败汇报显式转移,扫描不再静默跳过。
+- **重调度语义**:两处 INSERT 的 `ON CONFLICT` 改条件 `DO UPDATE`(共享 SQL 片段
+  `runnableActionReschedule`):仅现有行 `state='failed' AND failure_class='infrastructure'`
+  时重置 queued、attempt=0、清空 failure 三列、next_run_at 取新调度时刻;artifact 失败
+  原样缓存,重装 fail-fast 是特性。
+- **到期归因(worker/runnable/runner.go)**:`reportFailure` 将
+  `context.DeadlineExceeded`(含包装)归为 artifact、code=`execution-deadline-exceeded`,
+  一次完成失败——infra 重试不再把最坏耐心放大成尝试数 × 执行期限。
 - **失败传导**:`ResolveVerificationForAction`/`ResolveMaterializedRunnableRevision` 先查
-  动作行,state='failed' 时返回携带 class/code/summary 的显式错误(新
-  `ErrRunnableActionFailed`),而非"还没好";coordinator 对该错误走工作流 `StateFailed`
-  既有终态,installer 走既有 `FailRelease`;`report.Passed=false → FailRelease` 的既有
-  路径不变。
-- **测试**:退避序列与封顶;耗尽显式 failed(class/code 断言);claim 扫描无截断
-  (attempt 超限仍可认领,直至失败汇报显式转移);重调度对 infra-failed 重置、对
-  artifact-failed 缓存;deadline-exceeded 归 artifact;coordinator/installer 对 failed
-  动作不再等待、走各自失败路径;既有"报告携带 artifact 失败即完成"不回归。
+  动作行(failure 三列与身份全列匹配,行不一致视为完整性错误),failed 时返回新
+  `runnable.ActionFailure`(携带 class/code/summary,`Unwrap` 到哨兵
+  `ErrRunnableActionFailed`)而非 `ErrMaterializationNotReady`;coordinator 对该错误调
+  新增 `GenerationRepository.FailRunnableGenerationWorkflow`(Materializing/Verifying →
+  既有 `StateFailed` 终态,state_version+1,last_error 带类/码/摘要);installer 的
+  `advanceEntries` 两处走既有 `FailRelease`;`report.Passed=false → FailRelease` 既有
+  路径不动。
+- **schema 58→59(一处对计划的如实偏离)**:计划断言"零 schema 迁移"的前提是"实现时
+  核实无其他约束"。核实发现 `runnable_actions.attempt` 有未列入的
+  `CHECK (attempt <= 5)`——"claim 无截断、attempt 超限仍可认领、耗尽只由失败汇报显式
+  转移"要求租约接管链可把 attempt 推过任何有限上限,CHECK 必须放宽为
+  `CHECK (attempt >= 0)`。动作四态、failure_class CHECK、openapi 与前端生成物零改动
+  (AdminRunnableActionItem 的 state/failure 为自由字符串,已核实)。
+- **测试**:domain 曲线序列与退化输入;仓库层——infra 退避序列(7 次回队 next_run_at
+  逐一对上曲线)+ 第 8 次显式 failed(class/code/summary 断言)+ failed 行不可认领 +
+  resolver 返回 ActionFailure;claim 无截断(手插 attempt=9 的 queued 行仍可认领至 10,
+  其失败汇报即显式耗尽);重调度二分(infra-failed 重置为 attempt=0 的新周期、
+  artifact-failed 原样缓存);runner——deadline 包装错误归 artifact/
+  execution-deadline-exceeded、"报告携带 artifact 失败即 completed"回归护栏(不再
+  ReportFailure、不再请求环境释放);coordinator——物化/验证两侧 failed 动作下一轮
+  即 StateFailed 且无投影写入;installer——新增 `installer_test.go`(复用
+  writePortableRelease fixture),物化/验证两侧 failed 动作走 FailRelease 且不再标记
+  Materialized/Verified。
 
-### 提交切分
+### 验收证据
 
-单提交交付(`feat(runnable): make action exhaustion an honest failure`):
-repository、worker、coordinator、installer 与全部测试、TODO 收口章并入同一提交,验收
-通过后收口章随本提交。
-
-### 验收门槛
-
-- 快车道全套:`make test-unit`、`make test-race`、`make verify-generated`、`make lint`、
-  `kubectl kustomize .`、`make web-test-unit` 全绿。
-- PostgreSQL 门控套件通过。**零 schema 迁移、零 openapi 改动**:动作四态
-  (queued/running/completed/failed)不动,`failure_class` CHECK
-  ('','artifact','infrastructure') 仅用现值,AdminRunnableActionItem 的 state/failure
-  字段为自由字符串——实现时核实无其他约束即成立。
-- 行为断言:任何路径都不再产生"停在 queued 却永不被认领"的行;显式 failed 的动作让
-  等待方在下一个观察周期走到失败出口,而非无限等待。
-- 不排 e2e:无新集群侧行为契约。
+- 快车道全套:`make test-unit`、`make test-race`、`make verify-generated`、`make lint`
+  (0 issues)、`kubectl kustomize .`、`make web-test-unit`(8 files / 51 tests,
+  web 侧本阶段零改动)全绿。
+- PostgreSQL 门控套件(schema 59 破坏迁移重建)通过。
+- 行为断言:任何路径都不再产生"停在 queued 却永不被认领"的行(claim 无截断 + 耗尽由
+  失败汇报显式转移);显式 failed 的动作让等待方在下一个观察周期走到失败出口
+  (coordinator→StateFailed、installer→FailRelease),而非无限等待。
+- 未排 e2e:无新集群侧行为契约(与计划一致)。
 
 ## 未立项事项
 

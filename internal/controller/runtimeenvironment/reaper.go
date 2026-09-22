@@ -12,32 +12,13 @@ import (
 const (
 	defaultReaperLeaseTTL = 30 * time.Second
 	defaultReaperRetry    = 5 * time.Second
-	// Failed retries back off exponentially from the base delay and cap at
-	// five minutes, then stay there forever. There is no attempt ceiling and
-	// no terminal give-up: the Custom Resource holds the goal, so the reaper
-	// keeps retrying a stuck teardown until the operator fixes or removes the
-	// underlying resource (a resource that is already gone counts as success).
-	reaperRetryCap = 5 * time.Minute
+	// Failed retries share the platform backoff curve (runnable.RetryBackoff):
+	// doubling from the base, capped at five minutes, then constant forever.
+	// There is no attempt ceiling and no terminal give-up: the Custom Resource
+	// holds the goal, so the reaper keeps retrying a stuck teardown until the
+	// operator fixes or removes the underlying resource (a resource that is
+	// already gone counts as success).
 )
-
-// reaperRetryDelay doubles the base delay after each failed attempt and caps
-// it, so the queue drains fast for transient errors and slowly for stuck ones.
-func reaperRetryDelay(base time.Duration, attempt int64) time.Duration {
-	if base <= 0 {
-		base = defaultReaperRetry
-	}
-	if attempt < 1 {
-		attempt = 1
-	}
-	delay := base
-	for range attempt - 1 {
-		delay *= 2
-		if delay >= reaperRetryCap {
-			return reaperRetryCap
-		}
-	}
-	return delay
-}
 
 type ReapRequest = runnable.ReapRequest
 type ReapRecord = runnable.ReapRecord
@@ -110,7 +91,7 @@ func (r *Reaper) RunOnce(ctx context.Context) (bool, error) {
 		retry = defaultReaperRetry
 	}
 	if !success {
-		retry = reaperRetryDelay(retry, claim.Record.Attempt)
+		retry = runnable.RetryBackoff(retry, claim.Record.Attempt)
 	}
 	if err := r.Queue.Complete(ctx, *claim, success, diagnostic, r.now(), r.now().Add(retry)); err != nil {
 		return true, err

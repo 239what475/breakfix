@@ -22,7 +22,12 @@ var (
 )
 
 const (
-	runnableMaxAttempts = 5
+	// Infra failures requeue on the platform backoff curve (5s doubling,
+	// capped at five minutes). The failure report — never the claim scan —
+	// moves an exhausted row to failed: a bounded patience with an explicit
+	// ending, because the scheduling coordinators above can react to failure.
+	runnableActionMaxAttempts = 8
+	runnableActionRetryBase   = 5 * time.Second
 )
 
 // StoreRunnableExecutionOutput persists one canonical provider capture under
@@ -94,6 +99,17 @@ func (d *RunnableRepository) ResolveRunnableExecutionOutput(ctx context.Context,
 	return capture, nil
 }
 
+// runnableActionReschedule gives a deterministic action key a second life
+// only when its previous failure was the world's fault: an
+// infrastructure-failed row is reset to a fresh attempt cycle. Artifact
+// failures stay cached — identical content fails identically, so a fail-fast
+// reinstall is a feature, not a wedge.
+const runnableActionReschedule = `ON CONFLICT (action_key) DO UPDATE SET
+	state = 'queued', attempt = 0, lease_owner = '', lease_expires_at = NULL,
+	next_run_at = EXCLUDED.next_run_at, failure_class = '', failure_code = '', failure_summary = '',
+	updated_at = EXCLUDED.updated_at
+	WHERE runnable_actions.state = 'failed' AND runnable_actions.failure_class = 'infrastructure'`
+
 func (d *RunnableRepository) ScheduleMaterialization(ctx context.Context, spec runnable.RunnableSpec, stateVersion int64, now time.Time) (runnable.ActionIdentity, error) {
 	if stateVersion < 1 || now.IsZero() {
 		return runnable.ActionIdentity{}, errors.New("schedule runnable materialization is invalid")
@@ -112,7 +128,7 @@ func (d *RunnableRepository) ScheduleMaterialization(ctx context.Context, spec r
 	_, err = d.conn.ExecContext(ctx, `INSERT INTO runnable_actions
 		(action_key, content_kind, content_id, content_revision, spec_digest, phase, state_version, state, attempt, lease_owner, next_run_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, '', ?, ?, ?)
-		ON CONFLICT (action_key) DO NOTHING`, identity.Key(), identity.Content.Kind, identity.Content.ID, identity.Content.Revision, identity.SpecDigest, identity.Phase, identity.StateVersion, now.UTC(), now.UTC(), now.UTC())
+		`+runnableActionReschedule, identity.Key(), identity.Content.Kind, identity.Content.ID, identity.Content.Revision, identity.SpecDigest, identity.Phase, identity.StateVersion, now.UTC(), now.UTC(), now.UTC())
 	if err != nil {
 		return runnable.ActionIdentity{}, fmt.Errorf("schedule runnable materialization: %w", err)
 	}
@@ -201,7 +217,7 @@ func (d *RunnableRepository) ScheduleVerification(ctx context.Context, reference
 	_, err = d.conn.ExecContext(ctx, `INSERT INTO runnable_actions
 		(action_key, content_kind, content_id, content_revision, spec_digest, phase, state_version, runnable_revision_digest, state, attempt, lease_owner, next_run_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, '', ?, ?, ?)
-		ON CONFLICT (action_key) DO NOTHING`, identity.Key(), identity.Content.Kind, identity.Content.ID, identity.Content.Revision, identity.SpecDigest, identity.Phase, identity.StateVersion, reference.Digest, now.UTC(), now.UTC(), now.UTC())
+		`+runnableActionReschedule, identity.Key(), identity.Content.Kind, identity.Content.ID, identity.Content.Revision, identity.SpecDigest, identity.Phase, identity.StateVersion, reference.Digest, now.UTC(), now.UTC(), now.UTC())
 	if err != nil {
 		return runnable.ActionIdentity{}, fmt.Errorf("schedule runnable verification: %w", err)
 	}
@@ -219,8 +235,8 @@ func (d *RunnableRepository) ClaimRunnableAction(ctx context.Context, owner stri
 	defer func() { _ = tx.Rollback() }()
 	var row runnableActionRow
 	err = tx.QueryRowContext(ctx, `SELECT action_key, content_kind, content_id, content_revision, spec_digest, phase, state_version, COALESCE(runnable_revision_digest, ''), attempt
-		FROM runnable_actions WHERE ((state = 'queued' AND next_run_at <= ?) OR (state = 'running' AND lease_expires_at <= ?)) AND attempt < ?
-		ORDER BY next_run_at, created_at, action_key FOR UPDATE SKIP LOCKED LIMIT 1`, now.UTC(), now.UTC(), runnableMaxAttempts).
+		FROM runnable_actions WHERE ((state = 'queued' AND next_run_at <= ?) OR (state = 'running' AND lease_expires_at <= ?))
+		ORDER BY next_run_at, created_at, action_key FOR UPDATE SKIP LOCKED LIMIT 1`, now.UTC(), now.UTC()).
 		Scan(&row.key, &row.identity.Content.Kind, &row.identity.Content.ID, &row.identity.Content.Revision, &row.identity.SpecDigest, &row.identity.Phase, &row.identity.StateVersion, &row.revisionDigest, &row.attempt)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
@@ -259,20 +275,50 @@ func (d *RunnableRepository) RenewRunnableAction(ctx context.Context, credential
 	return nil
 }
 
+// ReportRunnableActionFailure closes one attempt under its lease fence.
+// Artifact failures fail terminally with the caller's code. Infrastructure
+// failures requeue on the platform backoff curve until the attempt ceiling,
+// where the row moves to the explicit failed state with
+// failure_code='attempts-exhausted' — the report, never the claim scan,
+// decides when patience ends.
 func (d *RunnableRepository) ReportRunnableActionFailure(ctx context.Context, credential runnable.LeaseCredential, class runnable.FailureClass, code, summary string, now time.Time) error {
 	if err := credential.Validate(); err != nil || !class.Valid() || strings.TrimSpace(code) == "" || strings.TrimSpace(summary) == "" || now.IsZero() {
 		return errors.New("runnable action failure is invalid")
 	}
-	state, retryAt := "failed", now.UTC()
-	if class == runnable.FailureInfrastructure {
-		state, retryAt = "queued", now.UTC().Add(time.Second)
+	tx, err := d.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin runnable action failure: %w", err)
 	}
-	result, err := d.conn.ExecContext(ctx, `UPDATE runnable_actions SET state = ?, lease_owner = '', lease_expires_at = NULL, next_run_at = ?, failure_class = ?, failure_code = ?, failure_summary = ?, updated_at = ? WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ?`, state, retryAt, class, strings.TrimSpace(code), truncateRunnableDiagnostic(summary), now.UTC(), credential.Identity.Key(), credential.LeaseOwner, now.UTC())
+	defer func() { _ = tx.Rollback() }()
+	var attempt int64
+	err = tx.QueryRowContext(ctx, `SELECT attempt FROM runnable_actions
+		WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ? FOR UPDATE`,
+		credential.Identity.Key(), credential.LeaseOwner, now.UTC()).Scan(&attempt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runnable.ErrActionLeaseLost
+	}
+	if err != nil {
+		return fmt.Errorf("lock runnable action failure: %w", err)
+	}
+	state, retryAt, failureCode := "failed", now.UTC(), strings.TrimSpace(code)
+	if class == runnable.FailureInfrastructure && attempt < runnableActionMaxAttempts {
+		state = "queued"
+		retryAt = now.UTC().Add(runnable.RetryBackoff(runnableActionRetryBase, attempt))
+	}
+	if class == runnable.FailureInfrastructure && attempt >= runnableActionMaxAttempts {
+		failureCode = "attempts-exhausted"
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE runnable_actions SET state = ?, lease_owner = '', lease_expires_at = NULL, next_run_at = ?, failure_class = ?, failure_code = ?, failure_summary = ?, updated_at = ?
+		WHERE action_key = ? AND state = 'running' AND lease_owner = ? AND lease_expires_at > ?`,
+		state, retryAt, class, failureCode, truncateRunnableDiagnostic(summary), now.UTC(), credential.Identity.Key(), credential.LeaseOwner, now.UTC())
 	if err != nil {
 		return fmt.Errorf("report runnable action failure: %w", err)
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		return runnable.ErrActionLeaseLost
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit runnable action failure: %w", err)
 	}
 	return nil
 }
@@ -344,12 +390,42 @@ func (d *RunnableRepository) CompleteRunnableMaterialization(ctx context.Context
 	return nil
 }
 
+// runnableActionFailure reads the durable action row behind an identity. A
+// failed row returns its stored failure explicitly so waiting coordinators
+// stop observing "not ready"; any other state (or no row yet) returns nil and
+// the caller falls through to its completion lookup.
+func (d *RunnableRepository) runnableActionFailure(ctx context.Context, identity runnable.ActionIdentity) error {
+	var state, failureClass, failureCode, failureSummary string
+	err := d.conn.QueryRowContext(ctx, `SELECT state, failure_class, failure_code, failure_summary FROM runnable_actions
+		WHERE action_key = ? AND content_kind = ? AND content_id = ? AND content_revision = ?
+			AND spec_digest = ? AND phase = ? AND state_version = ?`,
+		identity.Key(), identity.Content.Kind, identity.Content.ID, identity.Content.Revision, identity.SpecDigest, identity.Phase, identity.StateVersion).
+		Scan(&state, &failureClass, &failureCode, &failureSummary)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read runnable action failure: %w", err)
+	}
+	if state != "failed" {
+		return nil
+	}
+	failure := &runnable.ActionFailure{Class: runnable.FailureClass(failureClass), Code: failureCode, Summary: failureSummary}
+	if !failure.Class.Valid() || strings.TrimSpace(failure.Code) == "" || strings.TrimSpace(failure.Summary) == "" {
+		return errors.New("stored runnable action failure is inconsistent")
+	}
+	return failure
+}
+
 // ResolveMaterializedRunnableRevision returns the immutable revision produced
 // by one exact materialization action. Content services use the action they
 // scheduled instead of reconstructing the Worker's private record ID.
 func (d *RunnableRepository) ResolveMaterializedRunnableRevision(ctx context.Context, identity runnable.ActionIdentity) (runnable.RevisionReference, error) {
 	if err := identity.Validate(); err != nil || identity.Phase != runnable.ActionMaterializeArtifact {
 		return runnable.RevisionReference{}, errors.New("runnable materialization identity is invalid")
+	}
+	if err := d.runnableActionFailure(ctx, identity); err != nil {
+		return runnable.RevisionReference{}, err
 	}
 	var reference runnable.RevisionReference
 	err := d.conn.QueryRowContext(ctx, `SELECT revisions.id, actions.runnable_revision_digest
@@ -377,6 +453,9 @@ func (d *RunnableRepository) ResolveMaterializedRunnableRevision(ctx context.Con
 func (d *RunnableRepository) ResolveVerificationForAction(ctx context.Context, identity runnable.ActionIdentity) (runnable.StoredVerificationReport, error) {
 	if err := identity.Validate(); err != nil || identity.Phase != runnable.ActionVerify {
 		return runnable.StoredVerificationReport{}, errors.New("runnable verification identity is invalid")
+	}
+	if err := d.runnableActionFailure(ctx, identity); err != nil {
+		return runnable.StoredVerificationReport{}, err
 	}
 	var value runnable.StoredVerificationReport
 	var report, revision []byte

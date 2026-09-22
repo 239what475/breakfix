@@ -94,6 +94,40 @@ func TestRunnableCoordinatorResumesVerificationWithStoredRevision(t *testing.T) 
 	}
 }
 
+// An explicitly failed action takes the workflow to its Failed terminal state
+// on the very next pass instead of being observed as "not ready" forever.
+func TestRunnableCoordinatorFailsWorkflowForFailedActions(t *testing.T) {
+	failure := &runnable.ActionFailure{Class: runnable.FailureInfrastructure, Code: "attempts-exhausted", Summary: "provider kept failing"}
+
+	materializing, materializingRevision := runnableCoordinatorFixture(t, domain.StateMaterializingArtifact, 3)
+	materializingStore := &runnableCoordinatorStore{workflows: []domain.Workflow{materializing}, candidates: map[string]domain.Revision{materializing.ID: materializingRevision}}
+	materializingRuntime := &runnableCoordinatorRuntime{materializationFailure: failure}
+	if err := newRunnableCoordinatorForTest(t, materializingStore, materializingRuntime).RunOnce(context.Background()); err != nil {
+		t.Fatalf("fail materializing workflow: %v", err)
+	}
+	if len(materializingStore.materialized) != 0 {
+		t.Fatalf("failed materialization projected = %#v", materializingStore.materialized)
+	}
+	if got := materializingStore.workflows[0]; got.State != domain.StateFailed || got.LastError == "" || !strings.Contains(got.LastError, "attempts-exhausted") {
+		t.Fatalf("failed workflow = %#v, want Failed with the action failure", got)
+	}
+
+	verifying, verifyingRevision := runnableCoordinatorFixture(t, domain.StateVerifying, 7)
+	storedRevision := runnable.RevisionReference{ID: "runnable-revision-02", Digest: coordinatorDigest("b")}
+	verifyingRevision.RunnableRevisionRef = &storedRevision
+	verifyingStore := &runnableCoordinatorStore{workflows: []domain.Workflow{verifying}, candidates: map[string]domain.Revision{verifying.ID: verifyingRevision}}
+	verifyingRuntime := &runnableCoordinatorRuntime{verificationFailure: failure}
+	if err := newRunnableCoordinatorForTest(t, verifyingStore, verifyingRuntime).RunOnce(context.Background()); err != nil {
+		t.Fatalf("fail verifying workflow: %v", err)
+	}
+	if len(verifyingStore.verified) != 0 {
+		t.Fatalf("failed verification projected = %#v", verifyingStore.verified)
+	}
+	if got := verifyingStore.workflows[0]; got.State != domain.StateFailed || !strings.Contains(got.LastError, "provider kept failing") {
+		t.Fatalf("failed verifying workflow = %#v, want Failed with the action failure", got)
+	}
+}
+
 func newRunnableCoordinatorForTest(t *testing.T, store *runnableCoordinatorStore, runtime *runnableCoordinatorRuntime) *RunnableCoordinator {
 	t.Helper()
 	coordinator, err := NewRunnableCoordinator(store, runtime, runnableCoordinatorOperationsConfig(), time.Second)
@@ -145,6 +179,7 @@ type runnableCoordinatorStore struct {
 	candidates   map[string]domain.Revision
 	materialized []runnableCoordinatorMaterialized
 	verified     []runnableCoordinatorVerified
+	failures     []runnableCoordinatorFailure
 }
 
 type runnableCoordinatorMaterialized struct {
@@ -197,6 +232,23 @@ func (s *runnableCoordinatorStore) MarkGenerationCandidateVerified(_ context.Con
 	return nil
 }
 
+func (s *runnableCoordinatorStore) FailRunnableGenerationWorkflow(_ context.Context, workflowID, message string, _ time.Time) error {
+	for index := range s.workflows {
+		if s.workflows[index].ID == workflowID {
+			s.workflows[index].State = domain.StateFailed
+			s.workflows[index].StateVersion++
+			s.workflows[index].LastError = message
+		}
+	}
+	s.failures = append(s.failures, runnableCoordinatorFailure{workflowID: workflowID, message: message})
+	return nil
+}
+
+type runnableCoordinatorFailure struct {
+	workflowID string
+	message    string
+}
+
 type runnableCoordinatorRuntime struct {
 	sources              [][]byte
 	materialized         runnable.RevisionReference
@@ -208,6 +260,10 @@ type runnableCoordinatorRuntime struct {
 	materializeActions   []runnable.ActionIdentity
 	verifyActions        []runnable.ActionIdentity
 	verifyReferences     []runnable.RevisionReference
+	// Explicit terminal failures, as the Postgres resolvers raise them for a
+	// failed action row.
+	materializationFailure *runnable.ActionFailure
+	verificationFailure    *runnable.ActionFailure
 }
 
 func (r *runnableCoordinatorRuntime) StoreRunnableSource(_ context.Context, source runnable.SourceArchive, archive []byte, _ time.Time) error {
@@ -230,6 +286,9 @@ func (r *runnableCoordinatorRuntime) ScheduleMaterialization(_ context.Context, 
 }
 
 func (r *runnableCoordinatorRuntime) ResolveMaterializedRunnableRevision(_ context.Context, action runnable.ActionIdentity) (runnable.RevisionReference, error) {
+	if r.materializationFailure != nil {
+		return runnable.RevisionReference{}, r.materializationFailure
+	}
 	if !r.materializationReady {
 		return runnable.RevisionReference{}, runnable.ErrMaterializationNotReady
 	}
@@ -251,6 +310,9 @@ func (r *runnableCoordinatorRuntime) ScheduleVerification(_ context.Context, ref
 }
 
 func (r *runnableCoordinatorRuntime) ResolveVerificationForAction(_ context.Context, action runnable.ActionIdentity) (runnable.StoredVerificationReport, error) {
+	if r.verificationFailure != nil {
+		return runnable.StoredVerificationReport{}, r.verificationFailure
+	}
 	if !r.verificationReady {
 		return runnable.StoredVerificationReport{}, runnable.ErrMaterializationNotReady
 	}

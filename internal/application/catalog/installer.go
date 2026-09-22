@@ -292,6 +292,9 @@ func (i *Installer) advanceEntries(ctx context.Context, source *PortableSource, 
 			if errors.Is(err, runnable.ErrMaterializationNotReady) {
 				continue
 			}
+			if failed, failErr := i.failReleaseForAction(ctx, release.ID, err, now); failed {
+				return failErr
+			}
 			if err != nil {
 				return err
 			}
@@ -310,6 +313,9 @@ func (i *Installer) advanceEntries(ctx context.Context, source *PortableSource, 
 			if errors.Is(err, runnable.ErrMaterializationNotReady) {
 				continue
 			}
+			if failed, failErr := i.failReleaseForAction(ctx, release.ID, err, now); failed {
+				return failErr
+			}
 			if err != nil {
 				return err
 			}
@@ -323,6 +329,22 @@ func (i *Installer) advanceEntries(ctx context.Context, source *PortableSource, 
 		}
 	}
 	return nil
+}
+
+// failReleaseForAction routes an explicit runnable action failure into the
+// existing terminal release failure instead of waiting forever. The returned
+// flag tells the caller the error was consumed as a failure exit.
+func (i *Installer) failReleaseForAction(ctx context.Context, releaseID string, err error, now time.Time) (bool, error) {
+	if !errors.Is(err, runnable.ErrRunnableActionFailed) {
+		return false, nil
+	}
+	var failure *runnable.ActionFailure
+	message := err.Error()
+	if errors.As(err, &failure) {
+		message = fmt.Sprintf("catalog runnable action failed (%s/%s): %s", failure.Class, failure.Code, failure.Summary)
+	}
+	_, failErr := i.store.FailRelease(ctx, releaseID, message, now)
+	return true, failErr
 }
 
 func (i *Installer) ensureRelease(ctx context.Context) (*catalogdomain.Release, *PortableSource, error) {

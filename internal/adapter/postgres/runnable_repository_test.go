@@ -259,6 +259,201 @@ func TestRunnableRepositoryRetriesFailedReapsWithoutGivingUp(t *testing.T) {
 	}
 }
 
+// Infrastructure failures requeue on the platform backoff curve, and the
+// attempt that reaches the ceiling reports the explicit exhaustion failure —
+// the failure report, never the claim scan, ends the patience. The failed
+// row is visible to the resolver as a terminal action failure.
+func TestRunnableActionInfraFailureBacksOffThenFailsExplicitly(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	start := time.Now().UTC().Truncate(time.Microsecond)
+	revision := testRunnableRevision(t)
+	if err := database.Runnable.StoreRunnableSource(ctx, revision.Spec.Source, []byte("source archive"), start); err != nil {
+		t.Fatalf("store runnable source: %v", err)
+	}
+	identity, err := database.Runnable.ScheduleMaterialization(ctx, revision.Spec, 1, start)
+	if err != nil {
+		t.Fatalf("schedule materialization: %v", err)
+	}
+
+	// Attempts below the ceiling requeue with the shared delay curve and the
+	// caller's diagnostics intact.
+	clock := start
+	for attempt := int64(1); attempt < runnableActionMaxAttempts; attempt++ {
+		action, err := database.Runnable.ClaimRunnableAction(ctx, "worker-a", time.Minute, clock)
+		if err != nil || action == nil || action.Credential.Identity != identity || action.Attempt != attempt {
+			t.Fatalf("claim attempt %d = %#v, %v", attempt, action, err)
+		}
+		if err := database.Runnable.ReportRunnableActionFailure(ctx, action.Credential, runnable.FailureInfrastructure, "runnable-action-failed", "provider unavailable", clock); err != nil {
+			t.Fatalf("report infra failure %d: %v", attempt, err)
+		}
+		want := clock.Add(runnable.RetryBackoff(runnableActionRetryBase, attempt))
+		row := runnableActionRowState(t, database, identity.Key())
+		if row.state != "queued" || row.attempt != attempt || !row.nextRunAt.Equal(want) ||
+			row.failureClass != "infrastructure" || row.failureCode != "runnable-action-failed" || row.failureSummary != "provider unavailable" {
+			t.Fatalf("requeued attempt %d = %#v, want queued at %s with diagnostics", attempt, row, want)
+		}
+		clock = want
+	}
+
+	// The ceiling-th attempt moves the row to failed with the explicit
+	// exhaustion code; the caller's summary survives as the last error.
+	action, err := database.Runnable.ClaimRunnableAction(ctx, "worker-a", time.Minute, clock)
+	if err != nil || action == nil || action.Attempt != runnableActionMaxAttempts {
+		t.Fatalf("exhausted claim = %#v, %v", action, err)
+	}
+	if err := database.Runnable.ReportRunnableActionFailure(ctx, action.Credential, runnable.FailureInfrastructure, "runnable-action-failed", "provider unavailable", clock); err != nil {
+		t.Fatalf("report exhausted failure: %v", err)
+	}
+	row := runnableActionRowState(t, database, identity.Key())
+	if row.state != "failed" || row.attempt != runnableActionMaxAttempts || row.failureClass != "infrastructure" ||
+		row.failureCode != "attempts-exhausted" || row.failureSummary != "provider unavailable" {
+		t.Fatalf("exhausted row = %#v, want explicit infrastructure failure", row)
+	}
+
+	// A failed row is never claimable again, and the resolver hands the
+	// stored failure to the waiting coordinator instead of "not ready".
+	if late, err := database.Runnable.ClaimRunnableAction(ctx, "worker-b", time.Minute, clock.Add(time.Hour)); err != nil || late != nil {
+		t.Fatalf("failed claim = %#v, %v, want nothing claimable", late, err)
+	}
+	_, err = database.Runnable.ResolveMaterializedRunnableRevision(ctx, identity)
+	var failure *runnable.ActionFailure
+	if !errors.As(err, &failure) || !errors.Is(err, runnable.ErrRunnableActionFailed) ||
+		failure.Class != runnable.FailureInfrastructure || failure.Code != "attempts-exhausted" || failure.Summary != "provider unavailable" {
+		t.Fatalf("resolve failed materialization = %v, want the explicit action failure", err)
+	}
+}
+
+// The claim scan has no attempt truncation: a queued row past any policy
+// ceiling is still claimable, and only a failure report transfers it to
+// failed. Rows can therefore never wedge as "queued but never claimed".
+func TestRunnableActionClaimHasNoAttemptTruncation(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	revision := testRunnableRevision(t)
+	specDigest, err := revision.Spec.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := runnable.ActionIdentity{Content: revision.Spec.Identity, SpecDigest: specDigest, Phase: runnable.ActionMaterializeArtifact, StateVersion: 1}
+	if _, err := database.Runnable.StoreRunnableSpec(ctx, revision.Spec, now); err != nil {
+		t.Fatalf("store runnable spec: %v", err)
+	}
+	if _, err := database.conn.ExecContext(ctx, `INSERT INTO runnable_actions
+		(action_key, content_kind, content_id, content_revision, spec_digest, phase, state_version, state, attempt, next_run_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
+		identity.Key(), identity.Content.Kind, identity.Content.ID, identity.Content.Revision, identity.SpecDigest, identity.Phase, identity.StateVersion, runnableActionMaxAttempts+1, now.UTC(), now.UTC(), now.UTC()); err != nil {
+		t.Fatalf("insert over-ceiling action: %v", err)
+	}
+	action, err := database.Runnable.ClaimRunnableAction(ctx, "worker-a", time.Minute, now)
+	if err != nil || action == nil || action.Attempt != runnableActionMaxAttempts+2 {
+		t.Fatalf("over-ceiling claim = %#v, %v, want the row still claimable", action, err)
+	}
+	// The over-ceiling report fails explicitly instead of requeueing.
+	if err := database.Runnable.ReportRunnableActionFailure(ctx, action.Credential, runnable.FailureInfrastructure, "runnable-action-failed", "provider unavailable", now); err != nil {
+		t.Fatalf("report over-ceiling failure: %v", err)
+	}
+	row := runnableActionRowState(t, database, identity.Key())
+	if row.state != "failed" || row.failureCode != "attempts-exhausted" {
+		t.Fatalf("over-ceiling row = %#v, want explicit exhaustion", row)
+	}
+}
+
+// Rescheduling a deterministic action key resets only infrastructure
+// failures: identical content with an artifact failure fails identically, so
+// the cached failure must survive reinstall scheduling.
+func TestRunnableActionRescheduleResetsInfraFailuresOnly(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	revision := testRunnableRevision(t)
+	revisionDigest, err := revision.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Runnable.StoreRunnableRevision(ctx, runnable.StoredRevision{Reference: runnable.RevisionReference{ID: "revision-reschedule", Digest: revisionDigest}, Revision: revision, CreatedAt: now}); err != nil {
+		t.Fatalf("store runnable revision: %v", err)
+	}
+	if err := database.Runnable.StoreRunnableSource(ctx, revision.Spec.Source, []byte("source archive"), now); err != nil {
+		t.Fatalf("store runnable source: %v", err)
+	}
+	materialize, err := database.Runnable.ScheduleMaterialization(ctx, revision.Spec, 4, now)
+	if err != nil {
+		t.Fatalf("schedule materialization: %v", err)
+	}
+	verify, err := database.Runnable.ScheduleVerification(ctx, runnable.RevisionReference{ID: "revision-reschedule", Digest: revisionDigest}, 5, now)
+	if err != nil {
+		t.Fatalf("schedule verification: %v", err)
+	}
+
+	// Claim order follows the queue (materialization first). The verification
+	// action fails with the content's fault through the real reporting path;
+	// the materialization row is retired as an exhausted infrastructure
+	// failure (the exhaustion path itself is covered above).
+	claimed, err := database.Runnable.ClaimRunnableAction(ctx, "worker-a", time.Minute, now)
+	if err != nil || claimed == nil || claimed.Credential.Identity != materialize {
+		t.Fatalf("claim materialization = %#v, %v", claimed, err)
+	}
+	verifyAction, err := database.Runnable.ClaimRunnableAction(ctx, "worker-a", time.Minute, now)
+	if err != nil || verifyAction == nil || verifyAction.Credential.Identity != verify {
+		t.Fatalf("claim verification = %#v, %v", verifyAction, err)
+	}
+	if err := database.Runnable.ReportRunnableActionFailure(ctx, verifyAction.Credential, runnable.FailureArtifact, "assertion-unsatisfied", "terminal failure", now); err != nil {
+		t.Fatalf("report verification failure: %v", err)
+	}
+	if _, err := database.conn.ExecContext(ctx, `UPDATE runnable_actions SET state = 'failed', attempt = ?, failure_class = 'infrastructure', failure_code = 'attempts-exhausted', failure_summary = 'provider unavailable' WHERE action_key = ?`, runnableActionMaxAttempts, materialize.Key()); err != nil {
+		t.Fatalf("retire materialization as exhausted: %v", err)
+	}
+
+	// A verification action failed with the content's fault keeps its cached
+	// failure: the reschedule is a no-op, the row neither resets nor requeues.
+	if _, err := database.Runnable.ScheduleVerification(ctx, runnable.RevisionReference{ID: "revision-reschedule", Digest: revisionDigest}, 5, now.Add(time.Minute)); err != nil {
+		t.Fatalf("reschedule artifact-failed verification: %v", err)
+	}
+	row := runnableActionRowState(t, database, verify.Key())
+	if row.state != "failed" || row.attempt != 1 || row.failureClass != "artifact" || row.failureCode != "assertion-unsatisfied" {
+		t.Fatalf("artifact-failed reschedule = %#v, want the cached failure untouched", row)
+	}
+
+	// An infrastructure failure is the world's fault: rescheduling starts a
+	// fresh attempt cycle so a fixed provider can heal the entry.
+	if _, err := database.Runnable.ScheduleMaterialization(ctx, revision.Spec, 4, now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("reschedule infra-failed materialization: %v", err)
+	}
+	row = runnableActionRowState(t, database, materialize.Key())
+	if row.state != "queued" || row.attempt != 0 || row.failureClass != "" || row.failureCode != "" || row.failureSummary != "" {
+		t.Fatalf("infra-failed reschedule = %#v, want a fresh queued cycle", row)
+	}
+	if !row.nextRunAt.Equal(now.Add(2 * time.Minute)) {
+		t.Fatalf("infra-failed reschedule next run = %s, want the new schedule time", row.nextRunAt)
+	}
+	healed, err := database.Runnable.ClaimRunnableAction(ctx, "worker-b", time.Minute, now.Add(2*time.Minute))
+	if err != nil || healed == nil || healed.Credential.Identity != materialize || healed.Attempt != 1 {
+		t.Fatalf("healed claim = %#v, %v, want a fresh first attempt", healed, err)
+	}
+}
+
+type runnableActionState struct {
+	state          string
+	attempt        int64
+	nextRunAt      time.Time
+	failureClass   string
+	failureCode    string
+	failureSummary string
+}
+
+func runnableActionRowState(t *testing.T, database *Store, key string) runnableActionState {
+	t.Helper()
+	var value runnableActionState
+	if err := database.conn.QueryRowContext(context.Background(),
+		`SELECT state, attempt, next_run_at, failure_class, failure_code, failure_summary FROM runnable_actions WHERE action_key = ?`, key).
+		Scan(&value.state, &value.attempt, &value.nextRunAt, &value.failureClass, &value.failureCode, &value.failureSummary); err != nil {
+		t.Fatalf("read runnable action row %q: %v", key, err)
+	}
+	return value
+}
+
 func testRunnableRevision(t *testing.T) runnable.RunnableRevision {
 	t.Helper()
 	spec := runnable.RunnableSpec{

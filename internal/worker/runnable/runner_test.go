@@ -3,6 +3,7 @@ package runnableworker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -130,6 +131,71 @@ func TestRunnerRequeuesInfrastructureVerificationFailure(t *testing.T) {
 	}
 	if len(store.released) != 1 || store.released[0].ID != "environment-01" {
 		t.Fatalf("verification release request = %#v", store.released)
+	}
+}
+
+// A scenario that outlives its own approved execution deadline is the
+// content's fault, not the world's: the failure is reported once as artifact
+// and never requeued as infrastructure.
+func TestRunnerClassifiesExecutionDeadlineAsArtifactFailure(t *testing.T) {
+	action := materializationAction(t, 6)
+	store := &runnerStore{action: &action}
+	executor := &runnerExecutor{materialize: func(context.Context, runnable.MaterializeRequest) (runnable.RunnableRevision, error) {
+		return runnable.RunnableRevision{}, fmt.Errorf("materialize scenario: %w", context.DeadlineExceeded)
+	}}
+	runner, err := NewRunner(store, executor, RunnerConfig{WorkerID: "worker-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed, err := runner.ProcessOne(context.Background()); err != nil || !processed {
+		t.Fatalf("process deadline failure = %v, %v", processed, err)
+	}
+	if store.revision != nil || store.failure.class != runnable.FailureArtifact || store.failure.code != "execution-deadline-exceeded" {
+		t.Fatalf("stored action result = revision %#v failure %#v", store.revision, store.failure)
+	}
+}
+
+// A verification report that carries an artifact failure is a recorded,
+// legitimate result: the action completes so the report can travel, no
+// infrastructure retry is scheduled, and no cleanup is requested.
+func TestRunnerCompletesVerificationCarryingArtifactFailure(t *testing.T) {
+	spec := validSpec()
+	revision := runnable.RunnableRevision{FormatVersion: runnable.FormatVersion, Spec: spec, Artifact: artifactFor(t, spec)}
+	specDigest, err := spec.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisionDigest, err := revision.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := runnable.ActionContext{
+		Credential:       runnable.LeaseCredential{Identity: runnable.ActionIdentity{Content: spec.Identity, SpecDigest: specDigest, Phase: runnable.ActionVerify, StateVersion: 2}, LeaseOwner: "worker-01"},
+		Attempt:          1,
+		RunnableRevision: &revision, RunnableRevisionRef: runnable.RevisionReference{ID: "revision-01", Digest: revisionDigest},
+		RunnableRevisionDigest: revisionDigest,
+	}
+	store := &runnerStore{action: &action}
+	executor := &runnerExecutor{verify: func(context.Context, runnable.VerifyRequest) (runnable.VerificationReport, error) {
+		report := reportFor(t, revision)
+		report.Passed = false
+		report.Phases[1].Assertions[0].Satisfied = false
+		report.Phases[1].Assertions[0].Summary = "assertion observed a broken scenario"
+		report.Failure = &runnable.VerificationFailure{Class: runnable.FailureArtifact, Component: "scenario", Reason: "assertion-unsatisfied", Message: "scenario assertion never became true"}
+		return report, nil
+	}}
+	runner, err := NewRunner(store, executor, RunnerConfig{WorkerID: "worker-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed, err := runner.ProcessOne(context.Background()); err != nil || !processed {
+		t.Fatalf("process artifact-failed report = %v, %v", processed, err)
+	}
+	if store.report == nil || store.report.Report.Passed {
+		t.Fatalf("stored verification report = %#v, want the failed report persisted", store.report)
+	}
+	if store.failure != (runnerFailure{}) || len(store.released) != 0 {
+		t.Fatalf("artifact-failed report replayed as failure = %#v released=%#v", store.failure, store.released)
 	}
 }
 

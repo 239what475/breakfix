@@ -47,7 +47,9 @@ var schemaRunnableStatements = []string{
 		state_version BIGINT NOT NULL CHECK (state_version >= 1),
 		runnable_revision_digest TEXT REFERENCES runnable_revisions(runnable_revision_digest) ON DELETE RESTRICT,
 		state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'completed', 'failed')),
-		attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0 AND attempt <= 5),
+		-- No upper bound: exhaustion is an explicit failure-report transition,
+		-- and lease takeovers may claim past any finite policy ceiling.
+		attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
 		lease_owner TEXT NOT NULL DEFAULT '',
 		lease_expires_at TIMESTAMPTZ,
 		next_run_at TIMESTAMPTZ NOT NULL,

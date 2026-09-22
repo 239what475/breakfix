@@ -17,7 +17,27 @@ var (
 	ErrSourceNotFound          = errors.New("runnable source archive not found")
 	ErrOutputNotFound          = errors.New("runnable execution output not found")
 	ErrMaterializationNotReady = errors.New("runnable materialization is not complete")
+	// ErrRunnableActionFailed is the explicit terminal failure of one action
+	// row. Resolvers raise it instead of "not ready" so a waiting coordinator
+	// can take its own failure exit on the next observation instead of
+	// polling a failed action forever.
+	ErrRunnableActionFailed = errors.New("runnable action failed")
 )
+
+// ActionFailure carries the durable failure record of one action row — the
+// class, code, and summary stored with the failed state — out to the content
+// coordinators that scheduled the action.
+type ActionFailure struct {
+	Class   FailureClass
+	Code    string
+	Summary string
+}
+
+func (f *ActionFailure) Error() string {
+	return fmt.Sprintf("%s: %s [%s/%s]", ErrRunnableActionFailed.Error(), f.Summary, f.Class, f.Code)
+}
+
+func (f *ActionFailure) Unwrap() error { return ErrRunnableActionFailed }
 
 const (
 	ActionMaterializeArtifact ActionPhase = "materialize-artifact"

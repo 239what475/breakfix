@@ -470,6 +470,28 @@ func (d *GenerationRepository) ListRunnableGenerationCandidates(ctx context.Cont
 	return result, rows.Err()
 }
 
+// FailRunnableGenerationWorkflow moves a workflow whose public runnable
+// action failed terminally into the existing Failed terminal state. The
+// action row keeps the durable failure record for the queue surface; the
+// workflow stops waiting on the next coordinator pass instead of polling
+// a failed action forever.
+func (d *GenerationRepository) FailRunnableGenerationWorkflow(ctx context.Context, workflowID, message string, now time.Time) error {
+	if strings.TrimSpace(workflowID) == "" || strings.TrimSpace(message) == "" || now.IsZero() {
+		return errors.New("generation runnable failure is invalid")
+	}
+	result, err := d.conn.ExecContext(ctx, `UPDATE generation_workflows
+		SET state = ?, state_version = state_version + 1, last_error = ?, updated_at = ?
+		WHERE id = ? AND state IN (?, ?)`,
+		generation.StateFailed, strings.TrimSpace(message), now.UTC(), workflowID, generation.StateMaterializingArtifact, generation.StateVerifying)
+	if err != nil {
+		return fmt.Errorf("fail generation runnable workflow: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return generation.ErrCandidateInvalidState
+	}
+	return nil
+}
+
 func (d *GenerationRepository) CandidateForWorkflow(ctx context.Context, workflowID string) (*generation.Revision, error) {
 	var candidateID string
 	if err := d.conn.QueryRowContext(ctx, `SELECT candidate_revision_id FROM generation_workflows WHERE id = ?`, workflowID).Scan(&candidateID); errors.Is(err, sql.ErrNoRows) {

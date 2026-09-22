@@ -187,6 +187,11 @@ func (r *Runner) reportFailure(ctx context.Context, credential runnable.LeaseCre
 	var artifact *runnable.ArtifactFailure
 	if errors.As(executionErr, &artifact) {
 		class, code = runnable.FailureArtifact, artifact.Code
+	} else if errors.Is(executionErr, context.DeadlineExceeded) {
+		// The scenario did not finish inside its own approved deadline. That
+		// is the content's fault, not the world's: one failed attempt, so an
+		// infra retry cannot amplify the worst case into attempts × lifetime.
+		class, code = runnable.FailureArtifact, "execution-deadline-exceeded"
 	}
 	summary := strings.TrimSpace(executionErr.Error())
 	if summary == "" {

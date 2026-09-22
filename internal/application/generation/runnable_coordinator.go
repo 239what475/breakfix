@@ -18,6 +18,7 @@ type RunnableCoordinatorStore interface {
 	CandidateForWorkflow(context.Context, string) (*domain.Revision, error)
 	MarkGenerationCandidateMaterialized(context.Context, string, runnable.RevisionReference, time.Time) error
 	MarkGenerationCandidateVerified(context.Context, string, runnable.VerificationReportReference, time.Time) error
+	FailRunnableGenerationWorkflow(context.Context, string, string, time.Time) error
 }
 
 type RunnableCoordinatorStoreRuntime interface {
@@ -122,6 +123,12 @@ func (c *RunnableCoordinator) RunOnce(ctx context.Context) error {
 			if errors.Is(err, runnable.ErrMaterializationNotReady) {
 				continue
 			}
+			if failed, failErr := c.failWorkflowForAction(ctx, workflow.ID, err, now); failed {
+				if failErr != nil {
+					return failErr
+				}
+				continue
+			}
 			if err != nil {
 				return err
 			}
@@ -140,6 +147,12 @@ func (c *RunnableCoordinator) RunOnce(ctx context.Context) error {
 			if errors.Is(err, runnable.ErrMaterializationNotReady) {
 				continue
 			}
+			if failed, failErr := c.failWorkflowForAction(ctx, workflow.ID, err, now); failed {
+				if failErr != nil {
+					return failErr
+				}
+				continue
+			}
 			if err != nil {
 				return err
 			}
@@ -151,4 +164,19 @@ func (c *RunnableCoordinator) RunOnce(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// failWorkflowForAction routes an explicit runnable action failure into the
+// workflow's existing Failed terminal state instead of waiting forever. The
+// returned flag tells the caller the error was consumed as a failure exit.
+func (c *RunnableCoordinator) failWorkflowForAction(ctx context.Context, workflowID string, err error, now time.Time) (bool, error) {
+	if !errors.Is(err, runnable.ErrRunnableActionFailed) {
+		return false, nil
+	}
+	var failure *runnable.ActionFailure
+	message := err.Error()
+	if errors.As(err, &failure) {
+		message = fmt.Sprintf("runnable action failed (%s/%s): %s", failure.Class, failure.Code, failure.Summary)
+	}
+	return true, c.store.FailRunnableGenerationWorkflow(ctx, workflowID, message, now)
 }
