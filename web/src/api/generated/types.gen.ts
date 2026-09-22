@@ -8,6 +8,33 @@ export type ErrorResponse = {
     error: string;
 };
 
+export type DocumentationLink = {
+    /**
+     * Server-generated stable identifier; renaming a link never changes it
+     */
+    key: string;
+    title: string;
+    url: string;
+    /**
+     * Whether the target is known to allow iframe embedding; false renders an external-link card instead
+     */
+    embed: boolean;
+};
+
+export type DocumentationLinkList = {
+    links: Array<DocumentationLink>;
+};
+
+export type AdminDocumentationLinkInput = {
+    title: string;
+    url: string;
+    embed: boolean;
+};
+
+export type AdminDocumentationLinkDeletion = {
+    key: string;
+};
+
 export type DocumentationAnchor = {
     id: string;
     level: number;
@@ -749,6 +776,31 @@ export type GeneratorWorkflowId = string;
 
 export type GeneratorTurnId = string;
 
+export type ListDocumentationLinksData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/documentation/links';
+};
+
+export type ListDocumentationLinksErrors = {
+    /**
+     * Error
+     */
+    503: ErrorResponse;
+};
+
+export type ListDocumentationLinksError = ListDocumentationLinksErrors[keyof ListDocumentationLinksErrors];
+
+export type ListDocumentationLinksResponses = {
+    /**
+     * All documentation links, oldest first
+     */
+    200: DocumentationLinkList;
+};
+
+export type ListDocumentationLinksResponse = ListDocumentationLinksResponses[keyof ListDocumentationLinksResponses];
+
 export type GetDocumentationPageData = {
     body?: never;
     path?: never;
@@ -1279,6 +1331,113 @@ export type ReleaseAdminEnvironmentResponses = {
 };
 
 export type ReleaseAdminEnvironmentResponse = ReleaseAdminEnvironmentResponses[keyof ReleaseAdminEnvironmentResponses];
+
+export type CreateAdminDocumentationLinkData = {
+    body: AdminDocumentationLinkInput;
+    path?: never;
+    query?: never;
+    url: '/admin/documentation/links';
+};
+
+export type CreateAdminDocumentationLinkErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+};
+
+export type CreateAdminDocumentationLinkError = CreateAdminDocumentationLinkErrors[keyof CreateAdminDocumentationLinkErrors];
+
+export type CreateAdminDocumentationLinkResponses = {
+    /**
+     * The created link with its server-generated key
+     */
+    200: DocumentationLink;
+};
+
+export type CreateAdminDocumentationLinkResponse = CreateAdminDocumentationLinkResponses[keyof CreateAdminDocumentationLinkResponses];
+
+export type DeleteAdminDocumentationLinkData = {
+    body?: never;
+    path: {
+        key: string;
+    };
+    query?: never;
+    url: '/admin/documentation/links/{key}';
+};
+
+export type DeleteAdminDocumentationLinkErrors = {
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type DeleteAdminDocumentationLinkError = DeleteAdminDocumentationLinkErrors[keyof DeleteAdminDocumentationLinkErrors];
+
+export type DeleteAdminDocumentationLinkResponses = {
+    /**
+     * The removed link's key
+     */
+    200: AdminDocumentationLinkDeletion;
+};
+
+export type DeleteAdminDocumentationLinkResponse = DeleteAdminDocumentationLinkResponses[keyof DeleteAdminDocumentationLinkResponses];
+
+export type UpdateAdminDocumentationLinkData = {
+    body: AdminDocumentationLinkInput;
+    path: {
+        key: string;
+    };
+    query?: never;
+    url: '/admin/documentation/links/{key}';
+};
+
+export type UpdateAdminDocumentationLinkErrors = {
+    /**
+     * Error
+     */
+    400: ErrorResponse;
+    /**
+     * Error
+     */
+    401: ErrorResponse;
+    /**
+     * Error
+     */
+    403: ErrorResponse;
+    /**
+     * Error
+     */
+    404: ErrorResponse;
+};
+
+export type UpdateAdminDocumentationLinkError = UpdateAdminDocumentationLinkErrors[keyof UpdateAdminDocumentationLinkErrors];
+
+export type UpdateAdminDocumentationLinkResponses = {
+    /**
+     * The updated link
+     */
+    200: DocumentationLink;
+};
+
+export type UpdateAdminDocumentationLinkResponse = UpdateAdminDocumentationLinkResponses[keyof UpdateAdminDocumentationLinkResponses];
 
 export type GetAdminSystemData = {
     body?: never;

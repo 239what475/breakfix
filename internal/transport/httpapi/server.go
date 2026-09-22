@@ -146,6 +146,9 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	router.GET("/api/documentation/page", optionalJWTMW, h.GetDocumentationPage)
 	router.GET("/api/documentation/tree", optionalJWTMW, h.GetDocumentationTree)
 	router.GET("/api/documentation/asset", optionalJWTMW, h.GetDocumentationAsset)
+	// The documentation aggregation list is shared and public read; only the
+	// admin surface writes it.
+	router.GET("/api/documentation/links", optionalJWTMW, h.ListDocumentationLinks)
 	// The playground is a per-user session verb bound to the user alone: one
 	// environment per user, carried across the whole site.
 	router.GET("/api/playground", jwtMW, h.GetPlayground)
@@ -160,6 +163,13 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 	adminRoutes.Use(jwtMW, middleware.RequireAdmin())
 	adminRoutes.GET("/users", h.ListAdminUsers)
 	adminRoutes.POST("/users/:id/totp-reset", h.ResetAdminUserTOTP)
+	adminRoutes.POST("/documentation/links", h.CreateDocumentationLink)
+	adminRoutes.PATCH("/documentation/links/:key", func(c *gin.Context) {
+		h.UpdateDocumentationLink(c, c.Param("key"))
+	})
+	adminRoutes.DELETE("/documentation/links/:key", func(c *gin.Context) {
+		h.DeleteDocumentationLink(c, c.Param("key"))
+	})
 	adminRoutes.GET("/environments", h.ListAdminEnvironments)
 	adminRoutes.POST("/environments/:name/release", func(c *gin.Context) {
 		h.ReleaseAdminEnvironment(c, c.Param("name"))

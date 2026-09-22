@@ -14,14 +14,16 @@ import (
 // The action vocabulary is a closed set. A new verb must be registered here
 // before any write path may emit it.
 const (
-	ActionUserTOTPReset      = "user.totp.reset"
-	ActionEnvironmentRelease = "environment.release"
+	ActionUserTOTPReset          = "user.totp.reset"
+	ActionEnvironmentRelease     = "environment.release"
+	ActionDocumentationLinkWrite = "documentation.link.write"
 )
 
 // Target types name the durable object an action was aimed at.
 const (
 	TargetUser               = "user"
 	TargetRuntimeEnvironment = "runtime_environment"
+	TargetDocumentationLink  = "documentation_link"
 )
 
 type HumanAction struct {
@@ -43,7 +45,7 @@ func (a HumanAction) Validate() error {
 
 func validAction(action string) bool {
 	switch action {
-	case ActionUserTOTPReset, ActionEnvironmentRelease:
+	case ActionUserTOTPReset, ActionEnvironmentRelease, ActionDocumentationLinkWrite:
 		return true
 	}
 	return false

@@ -8,6 +8,22 @@ servers:
     description: Local dev
 
 paths:
+  /documentation/links:
+    get:
+      operationId: listDocumentationLinks
+      summary: List every documentation link in creation order (public read)
+      description: The shared list behind the documentation aggregation page; admin writes go through /admin/documentation/links.
+      tags: [documentation]
+      responses:
+        "200":
+          description: All documentation links, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationLinkList"
+        "503":
+          $ref: "#/components/responses/Error"
+
   /documentation/page:
     get:
       operationId: getDocumentationPage
@@ -435,6 +451,94 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
         "409":
+          $ref: "#/components/responses/Error"
+
+  /admin/documentation/links:
+    post:
+      operationId: createAdminDocumentationLink
+      summary: Add one documentation link to the shared aggregation list (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminDocumentationLinkInput"
+      responses:
+        "200":
+          description: The created link with its server-generated key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationLink"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+
+  /admin/documentation/links/{key}:
+    patch:
+      operationId: updateAdminDocumentationLink
+      summary: Replace one documentation link's title, URL, and embed flag (admin only)
+      description: The key never changes; saved references to the link stay valid across renames.
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminDocumentationLinkInput"
+      responses:
+        "200":
+          description: The updated link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentationLink"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteAdminDocumentationLink
+      summary: Remove one documentation link from the shared list (admin only)
+      tags: [admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The removed link's key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDocumentationLinkDeletion"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
           $ref: "#/components/responses/Error"
 
   /admin/system:
@@ -1285,6 +1389,49 @@ components:
       required: [error]
       properties:
         error:
+          type: string
+
+    DocumentationLink:
+      type: object
+      required: [key, title, url, embed]
+      properties:
+        key:
+          type: string
+          description: Server-generated stable identifier; renaming a link never changes it
+        title:
+          type: string
+        url:
+          type: string
+        embed:
+          type: boolean
+          description: Whether the target is known to allow iframe embedding; false renders an external-link card instead
+
+    DocumentationLinkList:
+      type: object
+      required: [links]
+      properties:
+        links:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentationLink"
+
+    AdminDocumentationLinkInput:
+      type: object
+      required: [title, url, embed]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        url:
+          type: string
+        embed:
+          type: boolean
+
+    AdminDocumentationLinkDeletion:
+      type: object
+      required: [key]
+      properties:
+        key:
           type: string
 
     DocumentationAnchor:
