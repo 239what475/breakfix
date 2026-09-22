@@ -43,7 +43,7 @@
 - 死信 reap 的人工重试动作(观测页已可见,处置留人工);
 - 容器级资源指标(Prometheus 接入后另立项)、平均使用时长等厚统计、按用户分层限额、
   前端轮询退避;
-- playground 的 node/Incus 类型、多实例(集合 API)、终态断言(学习闭环)若做另行立项;
+- playground 的 node/Incus 类型、多实例(集合 API)若做另行立项;
 - 工作区崩溃孤儿沙箱/PVC 清扫(authoring 侧遗留);
 - js-yaml ×3 等 Dependabot;ollama critical 无上游修复;#15 typescript 7 等 vue-tsc 跟进;
 - 首次真实发布后部署侧验证无凭证直拉。
