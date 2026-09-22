@@ -15,9 +15,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// Every playground test runs without a documentation library installed: the
-// binding is the user alone and no library, page, or content identity
-// participates in resolving the session.
+// Every playground test runs without any content source installed: the
+// binding is the user alone and no content identity participates in
+// resolving the session.
 func playgroundRequest(handler *Handler, method, action string, authenticated bool) *httptest.ResponseRecorder {
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)

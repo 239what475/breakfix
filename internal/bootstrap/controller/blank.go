@@ -9,9 +9,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-// Blank lifecycle mirrors the documentation practice environment values:
-// hands-on sessions are short-lived, idle sessions are reaped quickly, and the
-// maximum lifetime bounds every session even when the terminal stays active.
+// Blank lifecycle values: hands-on sessions are short-lived, idle sessions
+// are reaped quickly, and the maximum lifetime bounds every session even when
+// the terminal stays active.
 const (
 	blankActionTimeoutSeconds int64 = 900
 	blankCreateTimeoutSeconds int64 = 1800

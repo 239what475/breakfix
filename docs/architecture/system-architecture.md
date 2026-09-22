@@ -47,8 +47,9 @@ verify 与资源清理；Server application finalizer 原子写入产品发布�
 [Catalog Release](catalog-release.md)。
 
 运维场景 Catalog 只读取 `active operations-scenario` 及其 active immutable revision。每个摘要返回标签、runtime、标题、描述、
-发布时间和可用状态。标签是 revision 级、规范化的字符串集合。文档实践化预留 `/api/documentation` namespace，并在
-`internal/application/documentpractice` 中维护上游页面位置；在完成来源同步和阅读器前不开放空导航或复用此 Catalog。课程层级、
+发布时间和可用状态。标签是 revision 级、规范化的字符串集合。`/documentation` 聚合页读取全局共享的
+`documentation_links` 列表：admin 经 `/api/admin/documentation/links` 增改删（key 为服务端生成的短随机 id，改名不失效），
+所有人公开可读；页面以 iframe 展示条目，嵌入开关与常驻"新窗口打开"兜底跨域嵌入失败。课程层级、
 关系边、推荐图和后台分类任务不属于系统。
 
 ## Server 生命周期

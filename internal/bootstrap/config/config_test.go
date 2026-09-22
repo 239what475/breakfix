@@ -136,23 +136,6 @@ func TestWorkspaceIdleTTLDefaultsAndParses(t *testing.T) {
 	}
 }
 
-func TestDocumentationConfigRequiresACompleteLibraryIdentity(t *testing.T) {
-	if err := (DocumentationConfig{}).Validate(); err != nil {
-		t.Fatalf("disabled documentation config = %v", err)
-	}
-	configured := DocumentationConfig{LibraryRoot: "/var/lib/breakfix/documents", SourceID: "kubernetes", Repository: "https://github.com/kubernetes/website.git", Revision: strings.Repeat("a", 40), Version: "snapshot-a", Language: "en", License: "CC BY 4.0"}
-	if err := configured.Validate(); err != nil {
-		t.Fatalf("library documentation config = %v", err)
-	}
-	if !configured.Enabled() || (DocumentationConfig{}).Enabled() {
-		t.Fatal("documentation enablement must follow the configured library root")
-	}
-	configured.SourceID = ""
-	if err := configured.Validate(); err == nil {
-		t.Fatal("documentation without upstream identity was accepted")
-	}
-}
-
 func TestLoadExpandsHomeKubeconfigPath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "breakfix.yaml")
 	if err := os.WriteFile(path, []byte("kubeconfig: ~/.kube/config\n"), 0o600); err != nil {

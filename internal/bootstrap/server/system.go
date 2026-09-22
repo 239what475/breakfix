@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 
-	docsource "github.com/breakfix/breakfix/internal/adapter/documentation"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
 	"github.com/breakfix/breakfix/internal/buildinfo"
 	"github.com/breakfix/breakfix/internal/transport/httpapi"
@@ -14,13 +13,12 @@ import (
 // background service registry. Catalog integrity stays in the HTTP layer so
 // the check runs against the request context.
 type systemReportProvider struct {
-	cfg           config.Config
-	registry      *serviceRegistry
-	documentation *docsource.Library
+	cfg      config.Config
+	registry *serviceRegistry
 }
 
-func newSystemReportProvider(cfg config.Config, registry *serviceRegistry, documentation *docsource.Library) *systemReportProvider {
-	return &systemReportProvider{cfg: cfg, registry: registry, documentation: documentation}
+func newSystemReportProvider(cfg config.Config, registry *serviceRegistry) *systemReportProvider {
+	return &systemReportProvider{cfg: cfg, registry: registry}
 }
 
 func (p *systemReportProvider) Report(context.Context) (httpapi.SystemReport, error) {
@@ -37,19 +35,6 @@ func (p *systemReportProvider) Report(context.Context) (httpapi.SystemReport, er
 		BuildTime:               buildinfo.BuildTime,
 		CatalogReleaseReference: p.cfg.Catalog.ReleaseReference,
 		Services:                services,
-	}
-	if p.documentation != nil {
-		documentation := p.cfg.Documentation
-		parserVersion, upstreamCommit := p.documentation.Identity()
-		report.Documentation = &httpapi.SystemDocumentationReport{
-			SourceID:       documentation.SourceID,
-			Repository:     documentation.Repository,
-			Revision:       documentation.Revision,
-			Version:        documentation.Version,
-			Language:       documentation.Language,
-			ParserVersion:  parserVersion,
-			UpstreamCommit: upstreamCommit,
-		}
 	}
 	return report, nil
 }

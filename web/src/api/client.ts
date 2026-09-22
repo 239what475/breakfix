@@ -16,8 +16,6 @@ import type {
 	DocumentationLinkList,
 	AdminDocumentationLinkInput,
 	AdminDocumentationLinkDeletion,
-	DocumentationPageResponse,
-	DocumentationTreeResponse,
 	PlaygroundCloseResponse,
 	PlaygroundEnvironment,
 	ScenarioList,
@@ -248,16 +246,6 @@ export const api = {
     ),
 	listScenarios: () =>
 		request<ScenarioList>("GET", "/operations/scenarios"),
-	getDocumentationPage: (path: string) =>
-		request<DocumentationPageResponse>(
-			"GET",
-			`/documentation/page?path=${encodeURIComponent(path)}`,
-		),
-	getDocumentationTree: (path?: string) =>
-		request<DocumentationTreeResponse>(
-			"GET",
-			path ? `/documentation/tree?path=${encodeURIComponent(path)}` : "/documentation/tree",
-		),
 	// The aggregation list is public read; writes live on the admin trio.
 	listDocumentationLinks: () => request<DocumentationLinkList>("GET", "/documentation/links"),
 	createDocumentationLink: (input: AdminDocumentationLinkInput) =>

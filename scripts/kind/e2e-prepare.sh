@@ -190,9 +190,9 @@ if [ "$defer_server_restart" -eq 0 ]; then
 	BREAKFIX_KIND_SKIP_IMAGE_LOAD=1 BREAKFIX_KIND_SKIP_REGISTRY_RESTART=1 \
 		"$repo_root/scripts/kind/runtime.sh"
 else
-	# The calling prepare still patches documentation config into the
-	# Server deployment; keep it down so the target sees exactly one Server
-	# start once every patch is in place.
+	# The calling prepare still patches playground capacity into the Server
+	# config; keep it down so the target sees exactly one Server start once
+	# every patch is in place.
 	BREAKFIX_KIND_SKIP_IMAGE_LOAD=1 BREAKFIX_KIND_SKIP_REGISTRY_RESTART=1 \
 		BREAKFIX_KIND_SKIP_SERVER_ROLLOUT=1 "$repo_root/scripts/kind/runtime.sh"
 fi

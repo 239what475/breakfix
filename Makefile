@@ -1,8 +1,7 @@
-.PHONY: generate verify-generated verify-legacy-removal web-deps web-test-unit test-deps build images documentation-library-image deploy-kind reset-kind \
+.PHONY: generate verify-generated verify-legacy-removal web-deps web-test-unit test-deps build images deploy-kind reset-kind \
 	test-unit test-race lint catalog-package e2e-prepare e2e-reset e2e-bootstrap-core test-e2e test-e2e-node test-e2e-regression \
 	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network \
-	test-e2e-documentation docs-sync docs-build docs-check docs-metadata docs-smoke \
-	docs-project docs-fixture
+	test-e2e-playground
 
 VERSION ?= 0.1.0
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -38,9 +37,6 @@ TARGETOS ?= linux
 TARGETARCH ?= amd64
 RUNTIME_IMAGE_REPOSITORY ?= ghcr.io/breakfix
 RUNTIME_IMAGE_TAG ?= dev
-DOCS_SITE_SCRIPT := $(CURDIR)/docs-site/scripts/docs-site.sh
-DOCS_PROJECT_VERSION := docs-project-v10
-DOCS_PROJECT_FIXTURE := $(CURDIR)/test/fixtures/docs-project
 
 CATALOG_SOURCE ?=
 CATALOG_ARCHIVE ?= dist/catalog.oci.tar
@@ -59,39 +55,6 @@ $(TEST_DEPS_STAMP): $(TEST_DIR)/package.json $(TEST_DIR)/package-lock.json
 	@touch $@
 
 test-deps: $(TEST_DEPS_STAMP)
-
-docs-sync:
-	$(DOCS_SITE_SCRIPT) sync
-
-docs-build:
-	$(DOCS_SITE_SCRIPT) build
-
-docs-check:
-	$(DOCS_SITE_SCRIPT) check
-
-docs-metadata:
-	$(DOCS_SITE_SCRIPT) metadata
-
-docs-smoke: docs-check
-	BREAKFIX_DOCUMENTATION_SMOKE=1 BREAKFIX_DOCUMENTATION_LIBRARY_ROOT=$(CURDIR)/docs-site/documents go test -count=1 ./internal/adapter/documentation -run TestPinnedKubernetesPodLifecycle
-
-docs-project:
-	go run ./cmd/docs-project -root $(CURDIR)/docs-site/public -out $(CURDIR)/docs-site/documents -workers 8 -version $(DOCS_PROJECT_VERSION) -site-origin https://kubernetes.io
-
-docs-fixture:
-	@test -d $(CURDIR)/docs-site/public || { echo "docs-site/public is required; run make docs-build first" >&2; exit 2; }
-	@mkdir -p $(DOCS_PROJECT_FIXTURE)
-	@cp $(CURDIR)/docs-site/public/build-info.json $(DOCS_PROJECT_FIXTURE)/build-info.json
-	@cp $(CURDIR)/docs-site/public/_redirects $(DOCS_PROJECT_FIXTURE)/_redirects
-	@for page in docs/home docs/concepts/workloads/pods/pod-lifecycle docs/concepts/workloads/autoscaling/horizontal-pod-autoscale docs/concepts/services-networking/ingress docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes; do \
-		mkdir -p "$(DOCS_PROJECT_FIXTURE)/$$page"; \
-		cp "$(CURDIR)/docs-site/public/$$page/index.html" "$(DOCS_PROJECT_FIXTURE)/$$page/index.html"; \
-	done
-	@mkdir -p $(DOCS_PROJECT_FIXTURE)/docs/images $(DOCS_PROJECT_FIXTURE)/images/docs
-	@cp $(CURDIR)/docs-site/public/docs/images/ingress.svg $(DOCS_PROJECT_FIXTURE)/docs/images/ingress.svg
-	@cp $(CURDIR)/docs-site/public/docs/images/ingressFanOut.svg $(DOCS_PROJECT_FIXTURE)/docs/images/ingressFanOut.svg
-	@cp $(CURDIR)/docs-site/public/docs/images/ingressNameBased.svg $(DOCS_PROJECT_FIXTURE)/docs/images/ingressNameBased.svg
-	@cp $(CURDIR)/docs-site/public/images/docs/pod.svg $(DOCS_PROJECT_FIXTURE)/images/docs/pod.svg
 
 generate: web-deps
 	$(CONTROLLER_GEN) object paths=./api/v2
@@ -133,17 +96,7 @@ images: build
 	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-runtime-worker:$(RUNTIME_IMAGE_TAG) -f build/images/runtime-worker/Dockerfile $(BIN_DIR)
 	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false -t breakfix-k8s-base:latest build/images/k8s-base
 
-# The documentation library image carries the full parsed corpus (docs-project
-# output) as immutable, digest-addressable content. Deployment chains
-# docs-project -> library image -> kustomize; the E2E mini library keeps its
-# ConfigMap path instead.
-documentation-library-image: docs-project
-	docker build --platform $(TARGETOS)/$(TARGETARCH) --provenance=false \
-		-t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-documentation-library:$(RUNTIME_IMAGE_TAG) \
-		-t $(RUNTIME_IMAGE_REPOSITORY)/breakfix-documentation-library:$(DOCS_PROJECT_VERSION) \
-		-f build/images/documentation-library/Dockerfile docs-site
-
-deploy-kind: images documentation-library-image
+deploy-kind: images
 	./scripts/kind/runtime.sh
 
 reset-kind:
@@ -181,9 +134,7 @@ test-race:
 web-test-unit: web-deps
 	npm run test:unit --prefix $(WEB_DIR)
 
-# Scoped to the module's real packages: a prepared checkout also carries the
-# rendered upstream website under docs-site/public, whose example Go files
-# are not part of this module.
+# Scoped to the module's real packages.
 lint:
 	golangci-lint run ./cmd/... ./api/... ./internal/...
 
@@ -204,11 +155,10 @@ e2e-prepare:
 e2e-reset:
 	./scripts/kind/e2e-target.sh reset
 
-# One documentation prepare serves the whole chain; the database-only reset
-# between admin and documentation keeps each suite's counted assertions
-# valid without another prepare pass.
+# One prepare serves the whole chain; every suite in it shares the prepared
+# target so the counted assertions stay valid without another prepare pass.
 test-e2e-regression: test-deps
-	DOCS_PROJECT_VERSION=$(DOCS_PROJECT_VERSION) ./scripts/kind/run-e2e-regression.sh
+	./scripts/kind/run-e2e-regression.sh
 
 test-e2e-node: test-deps
 	./scripts/kind/run-e2e.sh node
@@ -219,9 +169,12 @@ test-e2e-k8s: test-deps
 test-e2e-recovery: test-deps
 	./scripts/kind/run-e2e.sh recovery
 
-test-e2e-documentation: test-deps
-	DOCS_PROJECT_VERSION=$(DOCS_PROJECT_VERSION) ./scripts/kind/e2e-documentation-prepare.sh
-	./scripts/kind/run-e2e.sh documentation
+# The playground owns a freshly prepared target: the aggregation smoke
+# registers the bootstrap admin first, then the playground suite runs with
+# the capacity gate pinned to a single session.
+test-e2e-playground: test-deps
+	./scripts/kind/e2e-playground-prepare.sh
+	./scripts/kind/run-e2e.sh playground
 
 test-acceptance-node: test-deps
 	@test "$(RUN_AGENT_LIVE_E2E)" = "1" || { echo "RUN_AGENT_LIVE_E2E=1 is required for live Node acceptance" >&2; exit 2; }

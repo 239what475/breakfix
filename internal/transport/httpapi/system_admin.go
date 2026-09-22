@@ -8,9 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetAdminSystem reports the Server's own state: build metadata, the pinned
-// documentation configuration, the live catalog integrity verdict, and the
-// background service registry. External binaries (controller, runtime worker)
+// GetAdminSystem reports the Server's own state: build metadata, the live
+// catalog integrity verdict, and the background service registry. External binaries (controller, runtime worker)
 // are deliberately absent: the Server cannot see their heartbeats.
 func (h *Handler) GetAdminSystem(c *gin.Context) {
 	if h == nil || h.systemReport == nil {
@@ -55,21 +54,5 @@ func (h *Handler) GetAdminSystem(c *gin.Context) {
 		integrity.Detail = &detail
 	}
 	status.CatalogIntegrity = integrity
-	if report.Documentation != nil {
-		documentation := &api.AdminDocumentationDeployment{
-			SourceId:   report.Documentation.SourceID,
-			Repository: report.Documentation.Repository,
-			Revision:   report.Documentation.Revision,
-			Version:    report.Documentation.Version,
-			Language:   report.Documentation.Language,
-		}
-		if report.Documentation.ParserVersion != "" {
-			documentation.ParserVersion = &report.Documentation.ParserVersion
-		}
-		if report.Documentation.UpstreamCommit != "" {
-			documentation.UpstreamCommit = &report.Documentation.UpstreamCommit
-		}
-		status.Documentation = documentation
-	}
 	c.JSON(http.StatusOK, status)
 }

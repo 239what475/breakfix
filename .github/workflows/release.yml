@@ -30,13 +30,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Restore the pinned upstream documentation checkout
-        uses: actions/cache@v6
-        with:
-          path: .local/docs
-          key: docs-upstream-${{ hashFiles('docs-site/manifest.yaml') }}
-      - name: Install ripgrep for the docs scripts
-        run: sudo apt-get install -y -qq ripgrep
       - name: Verify generated deployment contracts
         run: make verify-generated
       - name: Publish OCI images and digest-pinned deployment manifest
@@ -46,15 +39,8 @@ jobs:
           RUNTIME_IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}
           RUNTIME_IMAGE_TAG: ${{ github.ref_name }}
         run: |
-          make docs-sync
-          make docs-build
           make images TARGETOS=linux TARGETARCH=amd64
-          make documentation-library-image TARGETOS=linux TARGETARCH=amd64
-          # The server manifest mounts the documentation library as an image
-          # volume, so a release must publish it and pin its digest exactly
-          # like the runtime components — a tag reference here would deploy
-          # to ImagePullBackOff.
-          for component in server controller runtime-worker documentation-library; do
+          for component in server controller runtime-worker; do
             image="$RUNTIME_IMAGE_REPOSITORY/breakfix-$component:$RUNTIME_IMAGE_TAG"
             docker push "$image"
             digest="$(docker buildx imagetools inspect "$image" --format '{{.Manifest.Digest}}')"
@@ -63,11 +49,11 @@ jobs:
           done
           mkdir -p dist
           kubectl kustomize . > "dist/breakfix-$RUNTIME_IMAGE_TAG.yaml"
-          for component in server controller runtime-worker documentation-library; do
+          for component in server controller runtime-worker; do
             reference="$(cat "/tmp/breakfix-$component.ref")"
             sed -i "s|ghcr.io/breakfix/breakfix-$component:dev|$reference|g" "dist/breakfix-$RUNTIME_IMAGE_TAG.yaml"
           done
-          ! grep -Eq 'ghcr.io/breakfix/breakfix-(server|controller|runtime-worker|documentation-library):dev' "dist/breakfix-$RUNTIME_IMAGE_TAG.yaml"
+          ! grep -Eq 'ghcr.io/breakfix/breakfix-(server|controller|runtime-worker):dev' "dist/breakfix-$RUNTIME_IMAGE_TAG.yaml"
       - name: Release deployment artifact
         uses: softprops/action-gh-release@v3
         with:

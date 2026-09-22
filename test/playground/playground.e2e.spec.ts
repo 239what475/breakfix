@@ -135,20 +135,4 @@ test("the user drives one playground through create, terminal, reset, and close"
   await panel.getByRole("button", { name: "Close", exact: true }).click();
   await expectBallState(page, "none", 5 * 60_000);
   await expect.poll(async () => (await playgroundState(request, token)).state, { timeout: 60_000 }).toBe("none");
-
-  // The prepare reset leaves a fresh database, so the suite's first account is
-  // the bootstrap admin: the environment console renders against the live
-  // endpoints, and the overview card shows the cap this target configured.
-  const role = await page.evaluate(() => {
-    const payload = (localStorage.getItem("token") ?? "").split(".")[1] ?? "";
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    if (!normalized) return "";
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-    return (JSON.parse(atob(padded)) as { role?: string }).role ?? "";
-  });
-  expect(role).toBe("admin");
-  await page.getByRole("button", { name: "管理", exact: true }).click();
-  await page.getByRole("navigation", { name: "Admin sections" }).getByRole("button", { name: "环境", exact: true }).first().click();
-  await expect(page.getByRole("heading", { name: "环境观测" }).first()).toBeVisible();
-  await expect(page.locator(".admin-overview-card").first()).toContainText("/ 1", { timeout: 30_000 });
 });

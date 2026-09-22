@@ -15,19 +15,6 @@ type BackgroundServiceStatus struct {
 	LastError  string
 }
 
-// SystemDocumentationReport summarizes the pinned documentation deployment.
-// ParserVersion and UpstreamCommit carry the opened library's own identity and
-// stay empty on the legacy rendered-snapshot path.
-type SystemDocumentationReport struct {
-	SourceID       string
-	Repository     string
-	Revision       string
-	Version        string
-	Language       string
-	ParserVersion  string
-	UpstreamCommit string
-}
-
 // SystemReport carries the bootstrap-owned half of the admin system status.
 // The handler adds the live catalog integrity verdict.
 type SystemReport struct {
@@ -35,7 +22,6 @@ type SystemReport struct {
 	Commit                  string
 	BuildTime               string
 	CatalogReleaseReference string
-	Documentation           *SystemDocumentationReport
 	Services                []BackgroundServiceStatus
 }
 

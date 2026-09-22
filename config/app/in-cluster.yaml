@@ -17,18 +17,6 @@ registry:
 catalog:
   release_reference: ${BREAKFIX_CATALOG_RELEASE_REFERENCE}
 
-# This remains disabled until the immutable library image carrying the parsed
-# corpus is mounted read-only. The deployment pins the library identity, never
-# a page: ignition and batches address pages of the opened corpus.
-documentation:
-  library_root: ${BREAKFIX_DOCUMENTATION_LIBRARY_ROOT}
-  source_id: kubernetes
-  repository: https://github.com/kubernetes/website.git
-  revision: ce98a43f24257385a9766003a6dadc95e962dc63
-  version: snapshot-ce98a43
-  language: en
-  license: CC BY 4.0
-
 vcluster_binary: /usr/local/bin/vcluster
 vcluster_chart_repo: https://charts.loft.sh
 vcluster_chart_version: "0.35.1"

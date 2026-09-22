@@ -31,9 +31,8 @@ const (
 // environmentContentTarget is the content identity one learning environment is
 // pinned to, regardless of kind. Operations scenarios build it from their
 // catalog entry and resolve an immutable runnable revision; the blank
-// documentation scenario binds the pinned library directly and names no
-// revision. Both kinds share the find-or-create path and differ only in
-// labels and in how their binding resolves.
+// playground names no revision at all. Both kinds share the find-or-create
+// path and differ only in labels and in how their binding resolves.
 type environmentContentTarget struct {
 	kind       string
 	id         string

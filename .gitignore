@@ -26,8 +26,6 @@ config/breakfix.local.yaml
 # Build output
 bin/
 dist/
-docs-site/public/
-docs-site/documents/
 
 # Local reference repositories
 projects/

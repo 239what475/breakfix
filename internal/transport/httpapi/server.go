@@ -141,11 +141,6 @@ func SetupRouter(h *Handler, cfg config.Config, frontendFS fs.FS) (*gin.Engine, 
 			h.CreateTerminalTicket(c, c.Param("id"))
 		}
 	})
-	// Parsed library reads are public content covered by offline digests;
-	// they carry no user data, matching the catalog projection's read model.
-	router.GET("/api/documentation/page", optionalJWTMW, h.GetDocumentationPage)
-	router.GET("/api/documentation/tree", optionalJWTMW, h.GetDocumentationTree)
-	router.GET("/api/documentation/asset", optionalJWTMW, h.GetDocumentationAsset)
 	// The documentation aggregation list is shared and public read; only the
 	// admin surface writes it.
 	router.GET("/api/documentation/links", optionalJWTMW, h.ListDocumentationLinks)

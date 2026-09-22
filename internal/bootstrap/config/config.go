@@ -18,32 +18,31 @@ import (
 )
 
 type Config struct {
-	Port                      int                 `yaml:"port"`
-	HealthPort                int                 `yaml:"health_port"`
-	DataDir                   string              `yaml:"data_dir"`
-	DatabaseURL               string              `yaml:"database_url"`
-	Kubeconfig                string              `yaml:"kubeconfig"`
-	Registry                  RegistryConfig      `yaml:"registry"`
-	VClusterBinary            string              `yaml:"vcluster_binary"`
-	VClusterChartRepo         string              `yaml:"vcluster_chart_repo"`
-	VClusterChartVersion      string              `yaml:"vcluster_chart_version"`
-	UIOrigin                  string              `yaml:"ui_origin"`
-	Namespace                 string              `yaml:"namespace"`
-	CRDNamespace              string              `yaml:"crd_namespace"`
-	CooldownMinutes           int                 `yaml:"cooldown_minutes"`
-	JWTSecret                 string              `yaml:"jwt_secret"`
-	InternalWorkers           InternalWorkerKeys  `yaml:"internal_workers"`
-	Worker                    WorkerConfig        `yaml:"worker"`
-	Agent                     AgentConfig         `yaml:"agent"`
-	OpenSandbox               OpenSandboxConfig   `yaml:"opensandbox"`
-	Incus                     incus.Config        `yaml:"incus"`
-	Runtime                   RuntimeConfig       `yaml:"runtime"`
-	Catalog                   CatalogConfig       `yaml:"catalog"`
-	Documentation             DocumentationConfig `yaml:"documentation"`
-	Playground                PlaygroundConfig    `yaml:"playground"`
-	AllowRegistration         bool                `yaml:"allow_registration"`
-	AgentStuckAfter           string              `yaml:"agent_stuck_after"`
-	GeneratorWorkspaceIdleTTL string              `yaml:"generator_workspace_idle_ttl"`
+	Port                      int                `yaml:"port"`
+	HealthPort                int                `yaml:"health_port"`
+	DataDir                   string             `yaml:"data_dir"`
+	DatabaseURL               string             `yaml:"database_url"`
+	Kubeconfig                string             `yaml:"kubeconfig"`
+	Registry                  RegistryConfig     `yaml:"registry"`
+	VClusterBinary            string             `yaml:"vcluster_binary"`
+	VClusterChartRepo         string             `yaml:"vcluster_chart_repo"`
+	VClusterChartVersion      string             `yaml:"vcluster_chart_version"`
+	UIOrigin                  string             `yaml:"ui_origin"`
+	Namespace                 string             `yaml:"namespace"`
+	CRDNamespace              string             `yaml:"crd_namespace"`
+	CooldownMinutes           int                `yaml:"cooldown_minutes"`
+	JWTSecret                 string             `yaml:"jwt_secret"`
+	InternalWorkers           InternalWorkerKeys `yaml:"internal_workers"`
+	Worker                    WorkerConfig       `yaml:"worker"`
+	Agent                     AgentConfig        `yaml:"agent"`
+	OpenSandbox               OpenSandboxConfig  `yaml:"opensandbox"`
+	Incus                     incus.Config       `yaml:"incus"`
+	Runtime                   RuntimeConfig      `yaml:"runtime"`
+	Catalog                   CatalogConfig      `yaml:"catalog"`
+	Playground                PlaygroundConfig   `yaml:"playground"`
+	AllowRegistration         bool               `yaml:"allow_registration"`
+	AgentStuckAfter           string             `yaml:"agent_stuck_after"`
+	GeneratorWorkspaceIdleTTL string             `yaml:"generator_workspace_idle_ttl"`
 }
 
 func (c Config) AgentStuckDuration() (time.Duration, error) {
@@ -75,42 +74,6 @@ type RegistryConfig struct {
 // or development catalog empty; there is no HTTP installation endpoint.
 type CatalogConfig struct {
 	ReleaseReference string `yaml:"release_reference"`
-}
-
-// DocumentationConfig identifies one mounted immutable offline document
-// library (docs-project output) and its pinned upstream identity. The
-// deployment pins the library, never a page: the corpus is addressable per
-// page through the practice pipeline. An empty library_root disables the
-// product; there is no fallback origin or revision.
-type DocumentationConfig struct {
-	LibraryRoot string `yaml:"library_root"`
-	SourceID    string `yaml:"source_id"`
-	Repository  string `yaml:"repository"`
-	Revision    string `yaml:"revision"`
-	Version     string `yaml:"version"`
-	Language    string `yaml:"language"`
-	License     string `yaml:"license"`
-}
-
-func (c DocumentationConfig) Enabled() bool { return strings.TrimSpace(c.LibraryRoot) != "" }
-
-func (c DocumentationConfig) Validate() error {
-	if !c.Enabled() {
-		return nil
-	}
-	for name, value := range map[string]string{
-		"source_id":  c.SourceID,
-		"repository": c.Repository,
-		"revision":   c.Revision,
-		"version":    c.Version,
-		"language":   c.Language,
-		"license":    c.License,
-	} {
-		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("documentation %s is required when library_root is configured", name)
-		}
-	}
-	return nil
 }
 
 func (c CatalogConfig) Enabled() bool { return strings.TrimSpace(c.ReleaseReference) != "" }
@@ -425,7 +388,6 @@ func Load(path string) (Config, error) {
 	cfg.Registry.PullSecret = os.ExpandEnv(cfg.Registry.PullSecret)
 	cfg.Registry.TrustBundleFile = os.ExpandEnv(cfg.Registry.TrustBundleFile)
 	cfg.Catalog.ReleaseReference = os.ExpandEnv(cfg.Catalog.ReleaseReference)
-	cfg.Documentation.LibraryRoot = os.ExpandEnv(cfg.Documentation.LibraryRoot)
 	cfg.GeneratorWorkspaceIdleTTL = os.ExpandEnv(cfg.GeneratorWorkspaceIdleTTL)
 	cfg.Playground.MaxActive = os.ExpandEnv(cfg.Playground.MaxActive)
 	cfg.OpenSandbox.BaseURL = os.ExpandEnv(cfg.OpenSandbox.BaseURL)
@@ -542,9 +504,6 @@ func (c Config) ValidateServer() error {
 	}
 	if err := c.Catalog.Validate(); err != nil {
 		return fmt.Errorf("server catalog: %w", err)
-	}
-	if err := c.Documentation.Validate(); err != nil {
-		return fmt.Errorf("server documentation: %w", err)
 	}
 	return nil
 }

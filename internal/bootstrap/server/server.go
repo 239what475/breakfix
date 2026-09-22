@@ -212,13 +212,6 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 		cleanupDatabase()
 		return nil, fmt.Errorf("create generation runnable coordinator: %w", err)
 	}
-	documentationLibrary, err := openDocumentationLibrary(cfg)
-	if err != nil {
-		incusClient.Close()
-		cleanupDatabase()
-		return nil, err
-	}
-
 	var catalogInstaller *appcatalog.Installer
 	if cfg.Catalog.Enabled() {
 		catalogInstaller, err = appcatalog.NewInstaller(appcatalog.InstallerConfig{
@@ -303,14 +296,13 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	}
 	serviceContext := services.ctx
 	handler, err := httpapi.NewHandlerWithDependencies(database, k8sClient, cfg, httpapi.Dependencies{
-		NodeTerminal:         incusClient,
-		Assistant:            assistantService,
-		Authoring:            authoringService,
-		Catalog:              catalogService,
-		AgentRuntimeContext:  serviceContext,
-		Generator:            generatorService,
-		DocumentationLibrary: documentationLibrary,
-		SystemReport:         newSystemReportProvider(cfg, services.registry, documentationLibrary).Report,
+		NodeTerminal:        incusClient,
+		Assistant:           assistantService,
+		Authoring:           authoringService,
+		Catalog:             catalogService,
+		AgentRuntimeContext: serviceContext,
+		Generator:           generatorService,
+		SystemReport:        newSystemReportProvider(cfg, services.registry).Report,
 	})
 	if err != nil {
 		services.stop()

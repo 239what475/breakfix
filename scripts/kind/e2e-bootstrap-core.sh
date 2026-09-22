@@ -50,8 +50,7 @@ registry_htpasswd=$(docker run --rm httpd:2-alpine htpasswd -bnB "$registry_user
 
 # registry_repository, registry_trust_bundle_file, k8s_base_image_digest,
 # ui_origin, and catalog_release_reference are owned by the prepare chain and
-# start empty or as placeholders. The documentation prepare replaces the model
-# key with its fixture value, and OpenSandbox is never called under the core
+# start empty or as placeholders. OpenSandbox is never called under the core
 # profile, but the Server configuration validation requires a non-empty
 # lifecycle key.
 kubectl -n "$namespace" create secret generic "$runtime_secret" \

@@ -34,10 +34,10 @@ case "$profile" in
 esac
 
 case "$suite" in
-	ui|node|k8s|recovery|documentation|admin|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak)
+	ui|node|k8s|recovery|playground|admin|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak)
 		;;
 	*)
-		printf 'Usage: %s {ui|node|k8s|recovery|documentation|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak}\n' "$0" >&2
+		printf 'Usage: %s {ui|node|k8s|recovery|playground|acceptance-node|acceptance-mcp|acceptance-k8s|acceptance-interruption|agent-assistant|agent-soak}\n' "$0" >&2
 		exit 2
 		;;
 esac
@@ -226,10 +226,10 @@ run_suite() {
 		recovery)
 			npm run test:e2e:recovery --prefix "$repo_root/test"
 			;;
-		documentation)
-			# The blank practice scenario needs no model: it provisions real
-			# vk8s environments, which the prepared Kind target provides.
-			npm run test:e2e:documentation --prefix "$repo_root/test"
+		playground)
+			# The playground provisions real vk8s environments and needs no
+			# model; the same prepared target serves the aggregation smoke.
+			npm run test:e2e:playground --prefix "$repo_root/test"
 			;;
 		acceptance-node)
 			[ "${RUN_AGENT_LIVE_E2E:-}" = 1 ] ||

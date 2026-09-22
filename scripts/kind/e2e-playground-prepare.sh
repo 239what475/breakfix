@@ -5,18 +5,15 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 namespace=${BREAKFIX_NAMESPACE:-breakfix-system}
 runtime_secret=${BREAKFIX_RUNTIME_SECRET:-breakfix-runtime}
 state_dir=${BREAKFIX_E2E_STATE_DIR:-$repo_root/.local/e2e/${BREAKFIX_E2E_TARGET:-e2e}}
-docs_fixture_root=$repo_root/test/fixtures/docs-project
-library_dir=$state_dir/document-library
 target_script=$repo_root/scripts/kind/e2e-target.sh
 
-fail() { printf 'Breakfix documentation E2E prepare: %s\n' "$*" >&2; exit 1; }
+fail() { printf 'Breakfix playground E2E prepare: %s\n' "$*" >&2; exit 1; }
 require_command() { command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"; }
 
 for tool in base64 curl docker go jq kubectl make sed tr; do require_command "$tool"; done
-[ -f "$docs_fixture_root/build-info.json" ] || fail "docs-project fixture is incomplete; run make docs-fixture"
 
 port_forward_pid=
-port_forward_log=$state_dir/doc-prepare-port-forward.log
+port_forward_log=$state_dir/playground-prepare-port-forward.log
 
 start_port_forward() {
 	local_port=$1
@@ -37,8 +34,8 @@ trap stop_port_forward EXIT HUP INT TERM
 
 # Prepare the ordinary disposable target first so this suite inherits its
 # isolated database, Registry, Incus projects, and immutable runtime snapshot.
-# The Server rollout is deferred: this script patches documentation config
-# into the deployment afterwards and owns the single final rollout, the
+# The Server rollout is deferred: this script patches the playground capacity
+# into the deployment config afterwards and owns the single final rollout, the
 # fixture Catalog projection wait, and the prepared marker.
 BREAKFIX_E2E_DEFER_SERVER_RESTART=1 make -C "$repo_root" --no-print-directory e2e-prepare
 
@@ -53,59 +50,6 @@ kind_node=${BREAKFIX_E2E_KIND_NODE:-${kind_cluster}-control-plane}
 docker image inspect busybox:1.36.1 >/dev/null 2>&1 || docker pull busybox:1.36.1 >/dev/null
 docker save busybox:1.36.1 | docker exec -i "$kind_node" ctr --namespace=k8s.io images import - >/dev/null
 
-# The server consumes a real docs-project library, not a hand-made snapshot:
-# the committed rendered fixture pages are projected by the same generator that
-# produces the full library, so page digests match docs-site/documents exactly.
-generator_version=${DOCS_PROJECT_VERSION:-docs-project-v10}
-library_pages="docs/concepts/workloads/pods/pod-lifecycle/,docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/,docs/concepts/services-networking/ingress/"
-rm -rf "$library_dir"
-go run "$repo_root/cmd/docs-project" -root "$docs_fixture_root" -out "$library_dir" \
-	-version "$generator_version" -site-origin https://kubernetes.io \
-	-pages "$library_pages" || fail "docs-project library generation failed"
-[ -s "$library_dir/manifest.json" ] || fail "generated documentation library is incomplete"
-
-# ConfigMap keys are flat; deploy/manifests/server.yaml maps them back to
-# library paths with volume items. Server-side apply avoids the client-side
-# last-applied annotation, which would exceed the 256KiB annotation limit for
-# a library of this size.
-library_args=""
-for file in $(find "$library_dir" -type f | sort); do
-	key=$(printf '%s' "${file#"$library_dir"/}" | tr '/' '_')
-	library_args="$library_args --from-file=$key=$file"
-done
-# shellcheck disable=SC2086
-kubectl -n "$namespace" create configmap breakfix-documentation-library $library_args \
-	--dry-run=client -o yaml | kubectl apply --server-side --force-conflicts -f - >/dev/null
-
-# The deployment mounts the full library through the dedicated library image by
-# default. The E2E target keeps the mini library on its ConfigMap path: swap
-# only the documentation-library volume source back to the ConfigMap and leave
-# every other volume untouched.
-patched_volumes=$(kubectl -n "$namespace" get deployment breakfix-server -o json | jq -c '
-	.spec.template.spec.volumes | map(
-		if .name == "documentation-library" then
-			{
-				name: "documentation-library",
-				configMap: {
-					name: "breakfix-documentation-library",
-					items: [
-						{key: "manifest.json", path: "manifest.json"},
-						{key: "docs_concepts_workloads_pods_pod-lifecycle_index.md", path: "docs/concepts/workloads/pods/pod-lifecycle/index.md"},
-						{key: "docs_concepts_workloads_pods_pod-lifecycle_index.json", path: "docs/concepts/workloads/pods/pod-lifecycle/index.json"},
-						{key: "docs_concepts_workloads_autoscaling_horizontal-pod-autoscale_index.md", path: "docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/index.md"},
-						{key: "docs_concepts_workloads_autoscaling_horizontal-pod-autoscale_index.json", path: "docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/index.json"},
-						{key: "docs_concepts_services-networking_ingress_index.md", path: "docs/concepts/services-networking/ingress/index.md"},
-						{key: "docs_concepts_services-networking_ingress_index.json", path: "docs/concepts/services-networking/ingress/index.json"},
-						{key: "images_docs_pod.svg", path: "images/docs/pod.svg"}
-					]
-				}
-			}
-		else . end
-	)')
-[ -n "$patched_volumes" ] && [ "$patched_volumes" != "null" ] || fail "Breakfix Server deployment has no volumes to patch"
-kubectl -n "$namespace" patch deployment breakfix-server --type merge \
-	-p "$(jq -cn --argjson volumes "$patched_volumes" '{spec:{template:{spec:{volumes:$volumes}}}}')" >/dev/null
-
 config_name=$(kubectl -n "$namespace" get deployment breakfix-server -o json |
 	jq -r '.spec.template.spec.volumes[] | select(.name == "config") | .configMap.name // empty')
 [ -n "$config_name" ] || fail "Breakfix Server deployment has no config ConfigMap volume"
@@ -114,19 +58,17 @@ config=$(kubectl -n "$namespace" get configmap "$config_name" -o json | jq -r '.
 # The playground capacity gate is pinned to a single concurrent session: the
 # suite's second user must be rejected while the first session occupies the
 # only slot. The value stays a quoted string — the config parser expects one.
-config=$(printf '%s\n' "$config" | sed \
-	-e 's#^  library_root: .*#  library_root: /var/lib/breakfix/documentation/library#' \
-	-e 's#^  max_active: .*#  max_active: "1"#')
+config=$(printf '%s\n' "$config" | sed -e 's#^  max_active: .*#  max_active: "1"#')
 kubectl -n "$namespace" patch configmap "$config_name" --type merge --patch "$(jq -cn --arg config "$config" '{data:{"config.yaml":$config}}')" >/dev/null
 
-# The blank practice scenario needs no model credential: the documentation
-# surface is the parsed library plus real vk8s environments. Restart the
-# Server once so the patched configuration takes effect.
+# The playground provisions real vk8s environments and needs no model
+# credential. Restart the Server once so the patched configuration takes
+# effect.
 kubectl -n "$namespace" rollout restart deployment/breakfix-server >/dev/null
 kubectl -n "$namespace" rollout status deployment/breakfix-server --timeout=3m >/dev/null
 
 # The deferred e2e-prepare handed its fixture reference over; finish its job
-# now that the Server runs with every documentation patch in place.
+# now that the Server runs with the playground patch in place.
 catalog_reference=$(sed -n '1p' "$state_dir/catalog-reference")
 [ -n "$catalog_reference" ] || fail "deferred e2e-prepare left no catalog reference in $state_dir/catalog-reference"
 case "$catalog_reference" in
@@ -181,4 +123,4 @@ jq -e \
 stop_port_forward
 "$target_script" mark-prepared "$catalog_reference" "$ui_origin"
 
-printf 'Prepared documentation fixture on Kind target %s.\n' "$kind_cluster"
+printf 'Prepared playground target on Kind cluster %s.\n' "$kind_cluster"

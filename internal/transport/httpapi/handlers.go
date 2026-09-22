@@ -24,36 +24,35 @@ import (
 // Handler owns the Server's shared dependencies. HTTP handlers are separated
 // by domain so routing stays stable while each endpoint's responsibility is local.
 type Handler struct {
-	runtimeContext       context.Context
-	db                   *postgres.Store
-	k8s                  *kubernetes.Client
-	runnableBindings     operationsRunnableBindingResolver
-	authoring            *appauthoring.RuntimeService
-	catalog              *appcatalog.Service
-	assistant            *appassistant.Service
-	registryRepository   string
-	namespace            string
-	crdNamespace         string
-	scenariosDir         string
-	dataDir              string
-	cooldownMin          int
-	llm                  config.AgentConfig
-	jwtSecret            []byte
-	internalWorkers      config.InternalWorkerKeys
-	port                 int
-	uiOrigin             string
-	terminals            *terminalConnectionTracker
-	serverInstance       string
-	allowRegistration    bool
-	agentStuckAfter      time.Duration
-	playgroundMaxActive  int
-	runtimeConfig        config.RuntimeConfig
-	incusConfig          incus.Config
-	nodeTerminal         NodeTerminalProvider
-	nodeProviderReady    NodeProviderReadiness
-	generator            generatorApplication
-	documentationLibrary documentationLibrary
-	systemReport         SystemReportProvider
+	runtimeContext      context.Context
+	db                  *postgres.Store
+	k8s                 *kubernetes.Client
+	runnableBindings    operationsRunnableBindingResolver
+	authoring           *appauthoring.RuntimeService
+	catalog             *appcatalog.Service
+	assistant           *appassistant.Service
+	registryRepository  string
+	namespace           string
+	crdNamespace        string
+	scenariosDir        string
+	dataDir             string
+	cooldownMin         int
+	llm                 config.AgentConfig
+	jwtSecret           []byte
+	internalWorkers     config.InternalWorkerKeys
+	port                int
+	uiOrigin            string
+	terminals           *terminalConnectionTracker
+	serverInstance      string
+	allowRegistration   bool
+	agentStuckAfter     time.Duration
+	playgroundMaxActive int
+	runtimeConfig       config.RuntimeConfig
+	incusConfig         incus.Config
+	nodeTerminal        NodeTerminalProvider
+	nodeProviderReady   NodeProviderReadiness
+	generator           generatorApplication
+	systemReport        SystemReportProvider
 }
 
 // generatorApplication is the HTTP consumer's view of GeneratorService. The
@@ -78,14 +77,13 @@ type generatorApplication interface {
 }
 
 type Dependencies struct {
-	NodeTerminal         NodeTerminalProvider
-	Assistant            *appassistant.Service
-	Authoring            *appauthoring.RuntimeService
-	Catalog              *appcatalog.Service
-	AgentRuntimeContext  context.Context
-	Generator            generatorApplication
-	RunnableBindings     operationsRunnableBindingResolver
-	DocumentationLibrary documentationLibrary
+	NodeTerminal        NodeTerminalProvider
+	Assistant           *appassistant.Service
+	Authoring           *appauthoring.RuntimeService
+	Catalog             *appcatalog.Service
+	AgentRuntimeContext context.Context
+	Generator           generatorApplication
+	RunnableBindings    operationsRunnableBindingResolver
 	// SystemReport assembles the admin system status from process-scoped state
 	// that only the bootstrap owns: build information and the background
 	// service registry.
@@ -134,33 +132,32 @@ func NewHandlerWithDependencies(database *postgres.Store, client *kubernetes.Cli
 		agentRuntimeContext = context.Background()
 	}
 	handler := &Handler{
-		runtimeContext:       agentRuntimeContext,
-		db:                   database,
-		k8s:                  client,
-		runnableBindings:     dependencies.RunnableBindings,
-		catalog:              catalogService,
-		registryRepository:   cfg.Registry.Repository,
-		namespace:            cfg.Namespace,
-		crdNamespace:         cfg.CRDNamespace,
-		scenariosDir:         cfg.ScenariosDir(),
-		dataDir:              cfg.DataDir,
-		cooldownMin:          cfg.CooldownMinutes,
-		llm:                  cfg.Agent,
-		jwtSecret:            []byte(cfg.JWTSecret),
-		internalWorkers:      cfg.InternalWorkers,
-		port:                 cfg.Port,
-		uiOrigin:             cfg.UIOrigin,
-		terminals:            newTerminalConnectionTracker(time.Second),
-		serverInstance:       newServerInstanceID(),
-		allowRegistration:    cfg.AllowRegistration,
-		agentStuckAfter:      agentStuckAfter,
-		playgroundMaxActive:  playgroundMaxActive,
-		runtimeConfig:        cfg.Runtime,
-		incusConfig:          cfg.Incus,
-		nodeTerminal:         dependencies.NodeTerminal,
-		generator:            dependencies.Generator,
-		documentationLibrary: dependencies.DocumentationLibrary,
-		systemReport:         dependencies.SystemReport,
+		runtimeContext:      agentRuntimeContext,
+		db:                  database,
+		k8s:                 client,
+		runnableBindings:    dependencies.RunnableBindings,
+		catalog:             catalogService,
+		registryRepository:  cfg.Registry.Repository,
+		namespace:           cfg.Namespace,
+		crdNamespace:        cfg.CRDNamespace,
+		scenariosDir:        cfg.ScenariosDir(),
+		dataDir:             cfg.DataDir,
+		cooldownMin:         cfg.CooldownMinutes,
+		llm:                 cfg.Agent,
+		jwtSecret:           []byte(cfg.JWTSecret),
+		internalWorkers:     cfg.InternalWorkers,
+		port:                cfg.Port,
+		uiOrigin:            cfg.UIOrigin,
+		terminals:           newTerminalConnectionTracker(time.Second),
+		serverInstance:      newServerInstanceID(),
+		allowRegistration:   cfg.AllowRegistration,
+		agentStuckAfter:     agentStuckAfter,
+		playgroundMaxActive: playgroundMaxActive,
+		runtimeConfig:       cfg.Runtime,
+		incusConfig:         cfg.Incus,
+		nodeTerminal:        dependencies.NodeTerminal,
+		generator:           dependencies.Generator,
+		systemReport:        dependencies.SystemReport,
 	}
 	if handler.runnableBindings == nil && database != nil {
 		handler.runnableBindings = database.Runnable
