@@ -1,6 +1,6 @@
 .PHONY: generate verify-generated verify-legacy-removal web-deps web-test-unit test-deps build images deploy-kind reset-kind \
 	test-unit test-race lint catalog-package e2e-prepare e2e-reset e2e-bootstrap-core test-e2e test-e2e-node test-e2e-regression \
-	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network \
+	test-e2e-k8s test-e2e-recovery test-acceptance-node test-acceptance-mcp test-vk8s-network test-workspace-ownership \
 	test-e2e-playground
 
 VERSION ?= 0.1.0
@@ -192,3 +192,9 @@ test-acceptance-interruption: test-deps
 
 test-vk8s-network:
 	./scripts/kind/verify-vk8s-network-isolation.sh
+
+# Runs against a prepared Kind target (core profile suffices): asserts the
+# GeneratorWorkspace owner cascade and the reconciler's adoption cleanup on
+# the Kubernetes side alone.
+test-workspace-ownership:
+	./scripts/kind/verify-workspace-ownership.sh

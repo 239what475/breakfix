@@ -165,17 +165,17 @@ func (o *GeneratorWorkspaceOwner) ListWorkspaceOwners(ctx context.Context) ([]do
 	}
 	owners := make([]domain.WorkspaceOwner, 0, len(list.Items))
 	for _, item := range list.Items {
-		state, err := domainState(item.Status.Phase)
-		if err != nil {
-			return nil, fmt.Errorf("generator workspace owner %s: %w", item.Name, err)
-		}
+		// A CR with missing or unknown phase is not a list-level failure: it
+		// surfaces as an owner without facts, which the reconciler skips or
+		// releases instead of wedging adoption or startup.
 		owners = append(owners, domain.WorkspaceOwner{
-			ID:         item.Name,
-			WorkflowID: item.Status.WorkflowID,
-			Namespace:  item.Status.Namespace,
-			PVCName:    item.Status.PVCName,
-			SandboxID:  item.Status.SandboxID,
-			State:      state,
+			ID:          item.Name,
+			WorkflowID:  item.Status.WorkflowID,
+			Namespace:   item.Status.Namespace,
+			PVCName:     item.Status.PVCName,
+			SandboxID:   item.Status.SandboxID,
+			State:       workspaceState(item.Status.Phase),
+			Terminating: !item.DeletionTimestamp.IsZero(),
 		})
 	}
 	return owners, nil
@@ -235,16 +235,16 @@ func workspacePhase(state domain.WorkspaceState) apiv2.WorkspacePhase {
 	}
 }
 
-func domainState(phase apiv2.WorkspacePhase) (domain.WorkspaceState, error) {
+func workspaceState(phase apiv2.WorkspacePhase) domain.WorkspaceState {
 	switch phase {
 	case apiv2.WorkspacePhasePending:
-		return domain.WorkspacePending, nil
+		return domain.WorkspacePending
 	case apiv2.WorkspacePhaseActive:
-		return domain.WorkspaceActive, nil
+		return domain.WorkspaceActive
 	case apiv2.WorkspacePhaseDeleting:
-		return domain.WorkspaceDeleting, nil
+		return domain.WorkspaceDeleting
 	default:
-		return "", fmt.Errorf("invalid workspace phase %q", phase)
+		return ""
 	}
 }
 

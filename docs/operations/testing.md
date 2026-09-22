@@ -11,6 +11,7 @@ Breakfix 按依赖和失败边界分层测试。日常测试不启动模型、�
 | 集成测试 | PostgreSQL、OCI/Catalog、Incus 和外部适配器契约 | 按依赖显式运行 |
 | 平台验收 | Kind、Registry、Server、Controller、Runtime Worker、Incus 的少量真实主路径 | `make test-e2e-regression`（编排，或其中的 ui/k8s/node/recovery 单套件） |
 | Playground 验收 | 文档聚合页冒烟与空白实践场景（真实 vk8s 环境，无模型依赖） | `make test-e2e-playground` |
+| Workspace 所有权验收 | `GeneratorWorkspace` owner 级联与 Server 调和器的收养清理（k8s 侧，无 OpenSandbox 依赖） | `make test-workspace-ownership` |
 | Live Agent 验收 | 真实模型、OpenSandbox、网页 Node/K8s 与 MCP Authoring 全链路 | `make test-acceptance-node`、`make test-acceptance-mcp` 或手工 K8s 入口 |
 
 平台验收不替代快速测试；Controller 的 `envtest` 也不替代真实 Kind。发布冲突、finalizer、revision 并发和数据库边界由 Go

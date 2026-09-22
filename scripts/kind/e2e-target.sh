@@ -665,6 +665,13 @@ cleanup_generator_workspaces() {
 		delete_opensandbox_workspace "$workspace_id" "$workspace_namespace" "$sandbox_id"
 		kubectl -n "$workspace_namespace" delete persistentvolumeclaim "$pvc_name" \
 			--ignore-not-found --wait=true >/dev/null
+		# The GeneratorWorkspace CR is the ownership record: the reset drops it
+		# with its resources. The Server is scaled down here, so the cleanup
+		# finalizer must be lifted explicitly for the delete to complete.
+		kubectl -n "$workspace_namespace" patch generatorworkspace "$workspace_id" --type=merge \
+			-p '{"metadata":{"finalizers":null}}' --ignore-not-found >/dev/null 2>&1 || true
+		kubectl -n "$workspace_namespace" delete generatorworkspace "$workspace_id" \
+			--ignore-not-found --wait=true >/dev/null
 	done <"$workspace_file"
 	rm -f "$workspace_file"
 }

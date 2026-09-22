@@ -126,7 +126,10 @@ var schemaGenerationStatements = []string{
 	)`,
 	`CREATE TABLE generator_workspaces (
 		workspace_id TEXT PRIMARY KEY,
-		workflow_id TEXT NOT NULL REFERENCES generation_workflows(id) ON DELETE RESTRICT,
+		-- No workflow foreign key: the row is a rebuildable projection of the
+		-- GeneratorWorkspace CR, and adoption after a schema reset must be able
+		-- to recreate it without the workflow row it once belonged to.
+		workflow_id TEXT NOT NULL,
 		namespace TEXT NOT NULL,
 		pvc_name TEXT NOT NULL UNIQUE,
 		sandbox_id TEXT NOT NULL DEFAULT '',

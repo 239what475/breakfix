@@ -8,11 +8,14 @@ Agent 讨论，也可以让 Codex 等外部 Agent 通过本机 `breakfix-mcp` �
 ## 架构
 
 - **Server**：HTTP/Web UI、认证、终端代理、Catalog、学习记录、Authoring、Assistant、共享 GeneratorService 与 Judge；也是
-  PostgreSQL 和 immutable Scenario revision 的唯一写者。
+  PostgreSQL 和 immutable Scenario revision 的唯一写者，并调和 `GeneratorWorkspace`：每个生成工作区的
+  PVC 经 ownerReferences 级联于该 CR，集群外的 OpenSandbox 沙箱由 cleanup finalizer 保证先删，数据库行
+  只是可由 CR 重建的投影。
 - **`breakfix-mcp`**：用户机器上的 stdio MCP Server；经 HTTPS 与用户 Token 调用远程 Server 的 Generator application API，
   并把不可变审核包原子投影到本机可丢弃的只读目录。
 - **Controller**：只调和单一 `RuntimeEnvironment` CRD，根据不可变 runtime profile
-  供应、检查和回收真实环境。
+  供应、检查和回收真实环境。Generator 工作区不在其宪章内：`GeneratorWorkspace` 由
+  Server 自己调和。
 - **Runtime Worker**：独立运行公共 Runnable Action/Reaper 两条 loop，各自一次领取一个 fenced action；前者执行
   materialize 与 verify，后者只执行 `RuntimeEnvironment` resource reaping。Worker 不 promotion 内容 artifact 或写产品发布状态。
 - **PostgreSQL**：账户、学习事实、AuthoringSession、AgentRun、CandidateRevision、

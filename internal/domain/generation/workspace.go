@@ -56,6 +56,9 @@ type WorkspaceOwner struct {
 	PVCName    string
 	SandboxID  string
 	State      WorkspaceState
+	// Terminating reports that the CR carries a deletion timestamp, so its
+	// finalizer must be resolved rather than its facts reconciled.
+	Terminating bool
 }
 
 // Rebuildable reports whether the owner carries the full fact set the

@@ -34,10 +34,30 @@ Browser / breakfix-mcp
 | K8s artifact | 部署者提供的 OCI Registry | 按 immutable digest 读取。 |
 | Node artifact | Incus image project | 按完整 fingerprint 读取。 |
 | Environment CRD 和 provider 资源 | Controller | Controller 只调和 Environment，不写 Catalog 或 authoring 状态。 |
+| Generator 工作区资源（`GeneratorWorkspace` CR、workspace PVC、OpenSandbox 沙箱） | Server | CR 与资源同生共死：PVC 挂 ownerReferences 级联删除，沙箱由 cleanup finalizer 保证先删。数据库行是投影，升库丢行不丢资源。 |
 
 Server 是唯一的 HTTP、认证、Catalog、Authoring、Assistant 和 durable workflow 协调者。Authoring Agent 和本机
 `breakfix-mcp` 调用同一 GeneratorService；Judge 是唯一后台模型角色。Runtime Worker 只运行 lease-fenced 公共 materialize、
 verify 与资源清理；Server application finalizer 原子写入产品发布状态。
+
+## Generator 工作区所有权
+
+生成工作区遵循与 Rust 所有权同构的规则：owner 与资源同生共死。`GeneratorWorkspace` CR（`breakfix.dev/v2`，
+名 = workspace ID）是集群侧 owner——workspace PVC 挂 ownerReferences，CR 删除即级联；OpenSandbox 沙箱是集群外
+资源，由 `breakfix.dev/workspace-cleanup` finalizer 保证先删沙箱再让 CR 消失。PostgreSQL 的
+`generator_workspaces` 行降级为投影：轮次围栏、空闲退休与快照引用等内部状态仍以行为准，但行的丢失（破坏式
+schema 迁移、生产侧重置）不再遗孤任何集群资源。
+
+Server 进程内的两条分钟级 loop 分工：
+
+- **Workspace Reaper**：启动时退休未完成工作区、收养"有 CR 无行"的孤儿（重建投影行并直接转 deleting）；
+  周期驱动 pending 过期与 deleting 的状态转移。
+- **Workspace Reconciler**：执行 deleting CR 的 drop——先删已记录的沙箱，补挂存量 PVC 的 owner 引用，
+  移除 finalizer 并删 CR（级联收走 PVC），行随之标记 deleted；双向对账（有 CR 无行→收养，有行无
+  CR→补建）；并运行 leak sanitizer，按 `breakfix.app=generator` 元数据列出本应用沙箱、与 CR 集合求差，
+  告警、审计并删除无主者。既无行又无 CR 的历史孤儿留给人工清单，不做全租户扫描。
+
+Controller 的宪章不变：它只调和 `RuntimeEnvironment`，从不触碰 `GeneratorWorkspace`。
 
 ## Catalog 与发布
 

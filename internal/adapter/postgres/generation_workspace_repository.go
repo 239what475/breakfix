@@ -314,6 +314,12 @@ func (d *GenerationRepository) ListDeletingGeneratorWorkspaces(ctx context.Conte
 	return listGeneratorWorkspaces(ctx, d.conn, generatorWorkspaceSelect+` WHERE state = ? ORDER BY updated_at, workspace_id`, generation.WorkspaceDeleting)
 }
 
+// ListCurrentGeneratorWorkspaces lists the rows whose workspace may still be
+// in use: the projection rows a lost GeneratorWorkspace CR is rebuilt from.
+func (d *GenerationRepository) ListCurrentGeneratorWorkspaces(ctx context.Context) ([]generation.Workspace, error) {
+	return listGeneratorWorkspaces(ctx, d.conn, generatorWorkspaceSelect+` WHERE state IN (?, ?) ORDER BY created_at, workspace_id`, generation.WorkspacePending, generation.WorkspaceActive)
+}
+
 func (d *GenerationRepository) ListTerminalGeneratorWorkspaces(ctx context.Context) ([]generation.Workspace, error) {
 	return listGeneratorWorkspaces(ctx, d.conn, `SELECT w.workspace_id, w.workflow_id, w.namespace, w.pvc_name, w.sandbox_id, w.active_turn_id, w.idle_since, w.state,
 		w.provision_deadline, w.created_at, w.updated_at, w.deleted_at

@@ -90,6 +90,20 @@ func TestManagerRebuildsActiveWorkspaceWhenSandboxDisappears(t *testing.T) {
 	}
 }
 
+// reconcile completes the ownership lifecycle after the manager's state
+// transitions: one reconciler pass executes the drops the deleting CRs
+// describe.
+func reconcile(t *testing.T, manager *Manager) {
+	t.Helper()
+	reconciler, err := NewWorkspaceReconciler(manager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reconciler.ReconcileOnce(context.Background()); err != nil {
+		t.Fatalf("reconcile generator workspaces: %v", err)
+	}
+}
+
 func TestManagerRetiresWorkspaceBeforeReplacement(t *testing.T) {
 	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 	repo := &memoryWorkspaceRepository{}
@@ -119,6 +133,7 @@ func TestManagerRetiresWorkspaceBeforeReplacement(t *testing.T) {
 	if err := manager.CleanupDue(context.Background()); err != nil {
 		t.Fatalf("cleanup retired workspace: %v", err)
 	}
+	reconcile(t, manager)
 	retired, err = repo.GetGeneratorWorkspace(context.Background(), first.ID)
 	if err != nil || retired.State != domain.WorkspaceDeleted {
 		t.Fatalf("cleaned retired workspace = %#v, err=%v", retired, err)
@@ -193,20 +208,32 @@ func TestManagerRetireAndCleanupDriveOwnerToExplicitDeletion(t *testing.T) {
 	if owners.owners[first.ID].State != domain.WorkspaceDeleting {
 		t.Fatalf("retired owner = %#v", owners.owners[first.ID])
 	}
-	if err := manager.Cleanup(context.Background(), first.ID); err != nil {
+	if err := manager.CleanupDue(context.Background()); err != nil {
 		t.Fatalf("cleanup workspace: %v", err)
 	}
+	// The reconciler executes the drop the deleting CR describes and finishes
+	// with the explicit owner deletion.
+	reconcile(t, manager)
 	if owners.deleted != 1 {
 		t.Fatalf("owner deletion count = %d, want 1", owners.deleted)
 	}
 	if _, exists := owners.owners[first.ID]; exists {
 		t.Fatal("owner survived cleanup")
 	}
-	if err := manager.Cleanup(context.Background(), first.ID); err != nil {
-		t.Fatalf("cleanup already deleted workspace: %v", err)
+	deleted, err := repo.GetGeneratorWorkspace(context.Background(), first.ID)
+	if err != nil || deleted.State != domain.WorkspaceDeleted {
+		t.Fatalf("cleaned workspace = %#v, err=%v", deleted, err)
 	}
+	// Terminal rows converge any owner residue without repeating the drop.
+	if err := manager.CleanupDue(context.Background()); err != nil {
+		t.Fatalf("terminal cleanup: %v", err)
+	}
+	reconcile(t, manager)
 	if owners.deleted != 1 {
 		t.Fatalf("terminal cleanup repeated owner deletion: %d", owners.deleted)
+	}
+	if sandboxes.deleted != 1 {
+		t.Fatalf("sandbox deletion count = %d, want 1", sandboxes.deleted)
 	}
 }
 
@@ -279,19 +306,25 @@ func TestManagerAdoptsOwnerWithoutRowAndDropsIt(t *testing.T) {
 	if err != nil || intact.State != domain.WorkspaceActive {
 		t.Fatalf("live row was not left untouched: %#v, err=%v", intact, err)
 	}
-	// The rebuilt deleting row funnels into the regular cleanup, which drops
-	// the adopted resources and deletes the owner explicitly.
+	// The rebuilt deleting row funnels into the regular cleanup; the
+	// reconciler's drop completes it with the explicit owner deletion.
 	if err := manager.CleanupDue(context.Background()); err != nil {
 		t.Fatalf("cleanup adopted workspace: %v", err)
 	}
+	reconcile(t, manager)
 	if _, exists := owners.owners["generator-workspace-orphan"]; exists {
 		t.Fatal("adopted owner survived cleanup")
 	}
 	if _, exists := owners.owners[live.ID]; !exists {
 		t.Fatal("live owner was dropped by adoption cleanup")
 	}
-	if sandboxes.deleted != 1 || pvcs.deleted != 1 {
-		t.Fatalf("adopted resource drop = sandboxes:%d pvcs:%d, want 1/1", sandboxes.deleted, pvcs.deleted)
+	if sandboxes.deleted != 1 {
+		t.Fatalf("adopted sandbox drop = %d, want 1", sandboxes.deleted)
+	}
+	// The PVC follows the owner through garbage collection in the real
+	// cluster; the drop hardens its owner reference before the CR goes away.
+	if pvcs.ownerPatches != 1 {
+		t.Fatalf("adopted pvc owner hardening = %d, want 1", pvcs.ownerPatches)
 	}
 }
 
@@ -337,6 +370,7 @@ func TestWorkspaceReaperRetiresRestartedWorkspaceBeforeAsynchronousCleanup(t *te
 	if err := manager.CleanupDue(context.Background()); err != nil {
 		t.Fatalf("asynchronously clean retired workspace: %v", err)
 	}
+	reconcile(t, manager)
 	deleted, err := repo.GetGeneratorWorkspace(context.Background(), first.ID)
 	if err != nil || deleted.State != domain.WorkspaceDeleted {
 		t.Fatalf("cleaned workspace = %#v, err=%v", deleted, err)
@@ -549,6 +583,18 @@ func (r *memoryWorkspaceRepository) MarkGeneratorWorkspaceDeleted(_ context.Cont
 	return nil
 }
 
+func (r *memoryWorkspaceRepository) ListCurrentGeneratorWorkspaces(context.Context) ([]domain.Workspace, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]domain.Workspace, 0)
+	for _, record := range r.records {
+		if record.State == domain.WorkspacePending || record.State == domain.WorkspaceActive {
+			result = append(result, record)
+		}
+	}
+	return result, nil
+}
+
 func (r *memoryWorkspaceRepository) ListExpiredPendingGeneratorWorkspaces(_ context.Context, now time.Time) ([]domain.Workspace, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -677,9 +723,13 @@ func (r *memoryWorkspaceRepository) snapshotDigest(workflowID string) string {
 	return r.snapshots[workflowID]
 }
 
+// memoryWorkspacePVCs records the claim lifecycle. Cascade deletion is a
+// Kubernetes behavior the fakes cannot express: drops go through the owner
+// CR, and the reconciler's owner-reference hardening is tracked separately.
 type memoryWorkspacePVCs struct {
 	claims           map[string]struct{}
 	lastOwner        WorkspaceOwnerReference
+	ownerPatches     int
 	created, deleted int
 }
 
@@ -698,6 +748,17 @@ func (p *memoryWorkspacePVCs) EnsureWorkspacePVC(ctx context.Context, namespace,
 	p.lastOwner = owner
 	return nil
 }
+
+func (p *memoryWorkspacePVCs) EnsureWorkspacePVCOwner(_ context.Context, namespace, name string, owner WorkspaceOwnerReference) error {
+	key := namespace + "/" + name
+	if _, exists := p.claims[key]; !exists {
+		return nil
+	}
+	p.ownerPatches++
+	p.lastOwner = owner
+	return nil
+}
+
 func (p *memoryWorkspacePVCs) DeleteWorkspacePVC(_ context.Context, namespace, name string) error {
 	key := namespace + "/" + name
 	if _, exists := p.claims[key]; exists {
@@ -803,4 +864,17 @@ func (s *memoryWorkspaceSandboxes) DeleteWorkspace(_ context.Context, sandboxID 
 		}
 	}
 	return nil
+}
+
+func (s *memoryWorkspaceSandboxes) ListWorkspaceSandboxes(context.Context) ([]string, error) {
+	seen := make(map[string]struct{}, len(s.workspaces))
+	result := make([]string, 0, len(s.workspaces))
+	for _, sandboxID := range s.workspaces {
+		if _, exists := seen[sandboxID]; exists {
+			continue
+		}
+		seen[sandboxID] = struct{}{}
+		result = append(result, sandboxID)
+	}
+	return result, nil
 }

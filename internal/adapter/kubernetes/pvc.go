@@ -61,6 +61,28 @@ func (c *Client) EnsureWorkspacePVC(ctx context.Context, namespace, name, workfl
 	return ensurePVCOwnerReference(ctx, claims, current, owner)
 }
 
+// EnsureWorkspacePVCOwner guarantees an existing claim references its
+// GeneratorWorkspace owner without ever creating the claim: the drop path
+// calls it so the garbage collection cascade reaches claims provisioned
+// before the ownership transfer.
+func (c *Client) EnsureWorkspacePVCOwner(ctx context.Context, namespace, name string, owner appgeneration.WorkspaceOwnerReference) error {
+	namespace = strings.TrimSpace(namespace)
+	name = strings.TrimSpace(name)
+	if namespace == "" || name == "" || !ownerValid(owner) {
+		return fmt.Errorf("workspace pvc owner requires namespace, name, and a generator workspace owner reference")
+	}
+	claims := c.clientset.CoreV1().PersistentVolumeClaims(namespace)
+	current, err := claims.Get(ctx, name, metav1.GetOptions{})
+	if k8sErrors.IsNotFound(err) {
+		// Nothing to own: the drop never creates resources.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get workspace pvc: %w", err)
+	}
+	return ensurePVCOwnerReference(ctx, claims, current, owner)
+}
+
 // ensurePVCOwnerReference attaches the GeneratorWorkspace owner to a claim
 // provisioned before the ownership transfer, so a database reset can still
 // reclaim it through the CR.

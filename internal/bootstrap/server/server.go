@@ -113,6 +113,7 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	var generationAgents *appgeneration.AgentRunner
 	var generationRunnable *appgeneration.RunnableCoordinator
 	var workspaceReaper *appgeneration.WorkspaceReaper
+	var workspaceReconciler *appgeneration.WorkspaceReconciler
 	var workspaceSnapshotter *appgeneration.WorkspaceSnapshotter
 	if cfg.OpenSandbox.APIKey != "" {
 		generatorSandbox, err = opensandbox.New(cfg.OpenSandbox)
@@ -198,6 +199,12 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			incusClient.Close()
 			cleanupDatabase()
 			return nil, fmt.Errorf("recover generator workspaces: %w", err)
+		}
+		workspaceReconciler, err = appgeneration.NewWorkspaceReconciler(generatorWorkspace)
+		if err != nil {
+			incusClient.Close()
+			cleanupDatabase()
+			return nil, fmt.Errorf("create generator workspace reconciler: %w", err)
 		}
 	}
 
@@ -394,6 +401,10 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 	if workspaceReaper != nil {
 		workspaceReaper.OnTick = services.tickObserver("generator workspace reaper")
 		services.start("generator workspace reaper", workspaceReaper.Run)
+	}
+	if workspaceReconciler != nil {
+		workspaceReconciler.OnTick = services.tickObserver("generator workspace reconciler")
+		services.start("generator workspace reconciler", workspaceReconciler.Run)
 	}
 	if workspaceSnapshotter != nil {
 		workspaceSnapshotter.OnTick = services.tickObserver("generator workspace snapshotter")

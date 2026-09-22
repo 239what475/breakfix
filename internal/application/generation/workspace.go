@@ -13,6 +13,7 @@ import (
 
 type PVCManager interface {
 	EnsureWorkspacePVC(context.Context, string, string, string, string, WorkspaceOwnerReference) error
+	EnsureWorkspacePVCOwner(context.Context, string, string, WorkspaceOwnerReference) error
 	DeleteWorkspacePVC(context.Context, string, string) error
 }
 
@@ -22,6 +23,7 @@ type SandboxManager interface {
 	WaitWorkspace(context.Context, string) error
 	ResetWorkspace(context.Context, string, []byte) error
 	DeleteWorkspace(context.Context, string) error
+	ListWorkspaceSandboxes(context.Context) ([]string, error)
 }
 
 // WorkspaceOwnerReference names the GeneratorWorkspace CR a workspace PVC must
@@ -194,6 +196,12 @@ func (m *Manager) EnsureFresh(ctx context.Context, workflowID string, seed []byt
 				cancel()
 				return nil, false, err
 			}
+			// Publishing the Sandbox ID to the owner immediately (not only at
+			// activation) keeps the leak sanitizer's CR diff safe while the
+			// Sandbox is still being waited on and seeded.
+			if statusErr := m.owners.RecordWorkspaceOwnerStatus(provisionCtx, *record); statusErr != nil {
+				slog.Warn("record generator workspace owner status", "workspace_id", record.ID, "err", statusErr)
+			}
 		}
 		if err := m.sandboxes.WaitWorkspace(provisionCtx, record.SandboxID); err != nil {
 			cancel()
@@ -245,6 +253,10 @@ func (m *Manager) Retire(ctx context.Context, workflowID string) error {
 	return nil
 }
 
+// Cleanup transitions one workspace to deleting and marks its owner CR. The
+// actual drop is the Server-side reconciler's job: it deletes the Sandbox,
+// lets Kubernetes garbage-collect the owner-referenced PVC, and completes the
+// row once the CR is gone.
 func (m *Manager) Cleanup(ctx context.Context, workspaceID string) error {
 	if m == nil {
 		return errors.New("workspace manager is not configured")
@@ -257,34 +269,50 @@ func (m *Manager) Cleanup(ctx context.Context, workspaceID string) error {
 		return err
 	}
 	if record.State == domain.WorkspaceDeleted {
-		// Terminal rows normally have no owner left; retry the owner delete in
-		// case a previous pass failed after the durable transition.
-		return m.deleteOwner(ctx, record.ID)
+		return nil
 	}
 	m.retireOwner(ctx, record.ID)
-	sandboxID := strings.TrimSpace(record.SandboxID)
-	if sandboxID == "" {
-		var found bool
-		sandboxID, found, err = m.sandboxes.FindWorkspace(ctx, record.ID)
-		if err != nil {
-			return fmt.Errorf("find generator sandbox for cleanup: %w", err)
-		}
-		if !found {
-			sandboxID = ""
-		}
+	return nil
+}
+
+// dropWorkspace executes the irreducible cleanup for one deleting workspace:
+// the recorded cluster-external Sandbox dies first, the row is completed, the
+// claim is guaranteed to reference its owner even if it predates the
+// ownership transfer, and removing the owner then lets Kubernetes
+// garbage-collect the claim. Every step is idempotent so the reconciler can
+// converge across ticks. Only recorded Sandbox IDs are deleted here; a
+// Sandbox no durable fact claims is the leak sanitizer's backstop, so an
+// unreachable provider cannot silently wedge the cluster-side cascade.
+func (m *Manager) dropWorkspace(ctx context.Context, owner domain.WorkspaceOwner, record *domain.Workspace) error {
+	sandboxID := strings.TrimSpace(owner.SandboxID)
+	if record != nil && strings.TrimSpace(record.SandboxID) != "" {
+		sandboxID = strings.TrimSpace(record.SandboxID)
 	}
 	if sandboxID != "" {
 		if err := m.sandboxes.DeleteWorkspace(ctx, sandboxID); err != nil {
 			return fmt.Errorf("delete generator sandbox: %w", err)
 		}
 	}
-	if err := m.pvcs.DeleteWorkspacePVC(ctx, record.Namespace, record.PVCName); err != nil {
-		return fmt.Errorf("delete generator workspace pvc: %w", err)
+	if record != nil && record.State == domain.WorkspaceDeleting {
+		if err := m.repo.MarkGeneratorWorkspaceDeleted(ctx, record.ID, m.now()); err != nil {
+			return err
+		}
 	}
-	if err := m.repo.MarkGeneratorWorkspaceDeleted(ctx, record.ID, m.now()); err != nil {
-		return err
+	reference, err := m.owners.EnsureWorkspaceOwner(ctx, ownerRecord(owner))
+	if err != nil {
+		return fmt.Errorf("ensure generator workspace owner for drop: %w", err)
 	}
-	return m.deleteOwner(ctx, record.ID)
+	if err := m.pvcs.EnsureWorkspacePVCOwner(ctx, owner.Namespace, owner.PVCName, reference); err != nil {
+		return fmt.Errorf("ensure generator workspace pvc owner: %w", err)
+	}
+	return m.deleteOwner(ctx, owner.ID)
+}
+
+func ownerRecord(owner domain.WorkspaceOwner) domain.Workspace {
+	return domain.Workspace{
+		ID: owner.ID, WorkflowID: owner.WorkflowID, Namespace: owner.Namespace,
+		PVCName: owner.PVCName, SandboxID: owner.SandboxID, State: owner.State,
+	}
 }
 
 // AdoptOrphanedOwners rebuilds projection rows for GeneratorWorkspace CRs the

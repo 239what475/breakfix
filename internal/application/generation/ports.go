@@ -24,6 +24,7 @@ type WorkspaceRepository interface {
 	RetireIncompleteGeneratorWorkspaces(context.Context, time.Time) ([]generation.Workspace, error)
 	MarkGeneratorWorkspaceDeleted(context.Context, string, time.Time) error
 	ListExpiredPendingGeneratorWorkspaces(context.Context, time.Time) ([]generation.Workspace, error)
+	ListCurrentGeneratorWorkspaces(context.Context) ([]generation.Workspace, error)
 	ListDeletingGeneratorWorkspaces(context.Context) ([]generation.Workspace, error)
 	ListTerminalGeneratorWorkspaces(context.Context) ([]generation.Workspace, error)
 	ListGeneratorWorkspaceSnapshotTargets(context.Context) ([]generation.WorkspaceSnapshotTarget, error)

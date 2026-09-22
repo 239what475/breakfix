@@ -161,6 +161,35 @@ func (c *Client) WaitWorkspace(ctx context.Context, sandboxID string) error {
 	}
 }
 
+// ListWorkspaceSandboxes returns the IDs of every Sandbox tagged with the
+// breakfix.app=generator metadata. The leak sanitizer diffs this application-
+// scoped list against the GeneratorWorkspace CR set; other applications'
+// sandboxes are never listed.
+func (c *Client) ListWorkspaceSandboxes(ctx context.Context) ([]string, error) {
+	if c == nil || c.lifecycle == nil {
+		return nil, errors.New("opensandbox workspace client is required")
+	}
+	ids := make([]string, 0)
+	for page := 1; ; page++ {
+		result, err := c.lifecycle.ListSandboxes(ctx, sdk.ListOptions{
+			Metadata: map[string]string{workspaceAppMetadataKey: workspaceAppMetadataValue},
+			Page:     page,
+			PageSize: 100,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list generator sandboxes: %w", err)
+		}
+		for _, item := range result.Items {
+			if id := strings.TrimSpace(item.ID); id != "" {
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) >= result.Pagination.TotalItems || len(result.Items) == 0 {
+			return ids, nil
+		}
+	}
+}
+
 func (c *Client) DeleteWorkspace(ctx context.Context, sandboxID string) error {
 	if c == nil || c.lifecycle == nil || strings.TrimSpace(sandboxID) == "" {
 		return nil
