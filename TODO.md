@@ -45,7 +45,9 @@
   前端轮询退避;
 - playground 的 node/Incus 类型、多实例(集合 API)若做另行立项;
 - 工作区崩溃孤儿沙箱/PVC 清扫(authoring 侧遗留);
-- js-yaml ×3 等 Dependabot;ollama critical 无上游修复;#15 typescript 7 等 vue-tsc 跟进;
+- #15 typescript 7 等 vue-tsc 跟进(上游阻塞);ollama 警报若在模块图升至 v0.34.2 后仍有
+  残留,按"传递依赖、未链接进产物"显式忽略——go mod why 证实无任何 ollama 包被引用
+  (js-yaml ×3 与 shiki 遗留已随 2026-09-22 卫生批次解决);
 - 首次真实发布后部署侧验证无凭证直拉。
 
 ## 挂起待决策(不排期)
