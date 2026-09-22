@@ -75,7 +75,7 @@ var schemaRunnableStatements = []string{
 		-- ones. No foreign key: blank digests have no runnable_revisions row.
 		runnable_revision_digest TEXT NOT NULL,
 		reap_request JSONB NOT NULL,
-		state TEXT NOT NULL CHECK (state IN ('queued', 'claimed', 'succeeded', 'dead')),
+		state TEXT NOT NULL CHECK (state IN ('queued', 'claimed', 'succeeded')),
 		attempt BIGINT NOT NULL DEFAULT 0 CHECK (attempt >= 0),
 		lease_owner TEXT NOT NULL DEFAULT '',
 		lease_expires_at TIMESTAMPTZ,

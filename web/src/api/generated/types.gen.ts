@@ -148,7 +148,7 @@ export type AdminRunnableActionPage = {
 
 export type AdminRunnableReap = {
     reap_key: string;
-    state: 'queued' | 'claimed' | 'succeeded' | 'dead';
+    state: 'queued' | 'claimed' | 'succeeded';
     attempt: number;
     last_error: string;
     next_attempt_at: string;

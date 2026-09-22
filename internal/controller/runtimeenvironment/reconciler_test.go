@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -254,10 +253,11 @@ func TestReconcilerReapsAsynchronouslyAfterLeaseDrain(t *testing.T) {
 	}
 }
 
-// Failed reaps back off exponentially from the base delay and retire to the
-// dead terminal state once attempts are exhausted; a dead record is never
-// claimed again.
-func TestReaperBacksOffAndDeadlettersExhaustedReaps(t *testing.T) {
+// Failed reaps back off exponentially, cap at five minutes, and never give
+// up: every failed attempt returns to queued with diagnostics, so a stuck
+// teardown keeps retrying until the operator fixes or removes the underlying
+// resource.
+func TestReaperRetriesForeverAtCappedBackoff(t *testing.T) {
 	now := fixedRuntimeEnvironmentTime()
 	queue := NewInMemoryReapQueue()
 	revision := validRevision(t)
@@ -268,49 +268,38 @@ func TestReaperBacksOffAndDeadlettersExhaustedReaps(t *testing.T) {
 	provider := &reconcilerProvider{stopDone: true, releaseErr: errors.New("provider unavailable")}
 	reaper := &Reaper{Queue: queue, Provider: provider, Owner: "reaper-backoff", Retry: 5 * time.Second}
 
-	// The first failed attempts space the next try 5s, 10s, 20s ahead of the
-	// failure: exponential backoff from the configured base.
+	// The delay doubles from the 5s base, reaches the five-minute cap on the
+	// seventh attempt, and stays there for every attempt after that.
+	wantDelays := []time.Duration{
+		5 * time.Second, 10 * time.Second, 20 * time.Second, 40 * time.Second, 80 * time.Second, 160 * time.Second,
+		5 * time.Minute, 5 * time.Minute, 5 * time.Minute,
+	}
 	clock := now
-	for attempt, wantDelay := range []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second} {
+	for attempt, wantDelay := range wantDelays {
 		reaper.Now = func() time.Time { return clock }
 		if processed, err := reaper.RunOnce(context.Background()); err != nil || !processed {
-			t.Fatalf("backoff reaper processed=%t err=%v", processed, err)
+			t.Fatalf("backoff reaper attempt %d processed=%t err=%v", attempt+1, processed, err)
 		}
 		record, err := queue.Get(context.Background(), request.Key())
 		if err != nil || record.State != ReapQueued || record.Attempt != int64(attempt+1) || !record.NextAttemptAt.Equal(clock.Add(wantDelay)) {
-			t.Fatalf("backoff attempt %d record=%#v err=%v", attempt+1, record, err)
+			t.Fatalf("backoff attempt %d record=%#v want next=%s err=%v", attempt+1, record, clock.Add(wantDelay), err)
 		}
 		clock = record.NextAttemptAt
 	}
 
-	// Attempts up to the cap keep failing with the delay capped at five
-	// minutes; the attempt that reaches the cap retires the record to dead.
-	for attempt := 4; attempt <= reaperMaxAttempts; attempt++ {
-		reaper.Now = func() time.Time { return clock }
-		if processed, err := reaper.RunOnce(context.Background()); err != nil || !processed {
-			t.Fatalf("capped reaper attempt %d processed=%t err=%v", attempt, processed, err)
-		}
-		record, err := queue.Get(context.Background(), request.Key())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if attempt < reaperMaxAttempts {
-			want := clock.Add(reaperRetryDelay(5*time.Second, int64(attempt)))
-			if record.State != ReapQueued || !record.NextAttemptAt.Equal(want) {
-				t.Fatalf("capped attempt %d record=%#v want next=%s", attempt, record, want)
-			}
-			clock = record.NextAttemptAt
-			continue
-		}
-		if record.State != ReapDead || !strings.Contains(record.LastError, reaperDeadDiagnostic) {
-			t.Fatalf("exhausted record=%#v, want dead with the exhaustion diagnostic", record)
-		}
+	// There is no attempt ceiling: well past any historical bound the record
+	// is still queued, still records its last error, and remains claimable.
+	reaper.Now = func() time.Time { return clock }
+	if processed, err := reaper.RunOnce(context.Background()); err != nil || !processed {
+		t.Fatalf("far-future reaper processed=%t err=%v", processed, err)
 	}
-
-	// A dead record blocks the queue for no one: the claim scan skips it.
-	claim, err := queue.Claim(context.Background(), "reaper-late", time.Second, clock.Add(time.Hour))
-	if err != nil || claim != nil {
-		t.Fatalf("dead claim=%#v err=%v, want nothing claimable", claim, err)
+	record, err := queue.Get(context.Background(), request.Key())
+	if err != nil || record.State != ReapQueued || record.Attempt != int64(len(wantDelays)+1) || record.LastError == "" {
+		t.Fatalf("unbounded record=%#v err=%v, want queued with diagnostics", record, err)
+	}
+	claim, err := queue.Claim(context.Background(), "reaper-late", time.Second, record.NextAttemptAt)
+	if err != nil || claim == nil || claim.Record.Attempt != record.Attempt+1 {
+		t.Fatalf("late claim=%#v err=%v, want the stuck record claimable", claim, err)
 	}
 }
 

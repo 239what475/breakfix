@@ -1529,7 +1529,7 @@ components:
           type: string
         state:
           type: string
-          enum: [queued, claimed, succeeded, dead]
+          enum: [queued, claimed, succeeded]
         attempt:
           type: integer
         last_error:

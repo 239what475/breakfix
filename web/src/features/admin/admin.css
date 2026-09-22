@@ -687,13 +687,6 @@
 	color: #8c3a2b;
 }
 
-/* A dead reap is terminal: attempts are exhausted and only manual follow-up
-   can clear the leaked resources. */
-.admin-phase-badge[data-state="dead"] {
-	background: #2f2a28;
-	color: #f3d9cf;
-}
-
 .admin-phase-badge[data-phase="Draining"] {
 	background: #f4ecd9;
 	color: #7c611c;

@@ -45,7 +45,7 @@ const reaps: AdminRunnableReapList = {
 	reaps: [
 		{ reap_key: "breakfix-system/environment-1/uid-1", state: "queued", attempt: 2, last_error: "namespace ownership metadata mismatch", next_attempt_at: new Date(Date.now() + 60_000).toISOString(), updated_at: new Date(Date.now() - 1000).toISOString() },
 		{ reap_key: "breakfix-system/environment-2/uid-2", state: "succeeded", attempt: 1, last_error: "", next_attempt_at: new Date(Date.now() - 60_000).toISOString(), updated_at: new Date(Date.now() - 120_000).toISOString() },
-		{ reap_key: "breakfix-system/environment-3/uid-3", state: "dead", attempt: 20, last_error: "reap attempts exhausted: provider unavailable", next_attempt_at: new Date(Date.now() - 3_600_000).toISOString(), updated_at: new Date(Date.now() - 3_600_000).toISOString() },
+		{ reap_key: "breakfix-system/environment-3/uid-3", state: "queued", attempt: 12, last_error: "provider unavailable", next_attempt_at: new Date(Date.now() + 4 * 60_000).toISOString(), updated_at: new Date(Date.now() - 3_600_000).toISOString() },
 	],
 };
 
@@ -94,13 +94,15 @@ describe("AdminEnvironmentsPage", () => {
 		expect(rows[0].text()).toContain("namespace ownership metadata mismatch");
 		expect(rows[0].text()).toContain("2");
 
-		// A dead reap is a terminal dead-letter: the badge names the state and
-		// no next attempt is promised anymore.
-		const deadBadge = rows[2].get(".admin-phase-badge");
-		expect(deadBadge.attributes("data-state")).toBe("dead");
-		expect(deadBadge.text()).toBe("dead");
-		expect(rows[2].text()).toContain("reap attempts exhausted");
-		expect(rows[2].findAll("td")[4].text()).toBe("—");
+		// A long-stuck reap row is never terminal: it stays queued, keeps
+		// promising its next capped-backoff attempt, and carries the derived
+		// stuck highlight that asks for a human look.
+		const stuckBadge = rows[2].get(".admin-phase-badge");
+		expect(stuckBadge.attributes("data-state")).toBe("queued");
+		expect(stuckBadge.text()).toBe("queued");
+		expect(rows[2].text()).toContain("provider unavailable");
+		expect(rows[2].classes()).toContain("admin-row-stuck");
+		expect(rows[2].findAll("td")[4].text()).not.toBe("—");
 	});
 
 	it("filters the table by phase", async () => {

@@ -21,10 +21,6 @@ const (
 	ReapQueued    ReapState = "queued"
 	ReapClaimed   ReapState = "claimed"
 	ReapSucceeded ReapState = "succeeded"
-	// ReapDead is the dead-letter terminal state: attempts are exhausted and
-	// the record stays visible for manual follow-up. It never blocks anyone —
-	// a rebuilt environment gets a new UID and a fresh queue entry.
-	ReapDead ReapState = "dead"
 )
 
 // EnvironmentPurpose controls the public lifecycle use of an environment.
@@ -125,15 +121,16 @@ type ReapClaim struct {
 }
 
 // ReapQueue is the durable handoff between an Environment controller and a
-// cleanup worker. Completion must fence the exact claimed attempt and lease.
-// Deadletter moves an exhausted record to the dead terminal state under the
-// same lease fence; retry policy lives with the caller.
+// cleanup worker. Completion must fence the exact claimed attempt and lease;
+// retry policy lives with the caller. There is no terminal give-up state: the
+// record holder (the Custom Resource) never abandons the goal, so a failed
+// attempt always returns to queued and waits for the operator to fix the
+// underlying resource.
 type ReapQueue interface {
 	Enqueue(context.Context, ReapRequest) error
 	Get(context.Context, string) (ReapRecord, error)
 	Claim(context.Context, string, time.Duration, time.Time) (*ReapClaim, error)
 	Complete(context.Context, ReapClaim, bool, string, time.Time, time.Time) error
-	Deadletter(context.Context, ReapClaim, string, time.Time) error
 }
 
 // InMemoryReapQueue is only suitable for tests and local development.
@@ -224,31 +221,6 @@ func (q *InMemoryReapQueue) Complete(_ context.Context, claim ReapClaim, succeed
 		record.LastError = boundedReapDiagnostic(diagnostic)
 		record.NextAttemptAt = retryAt.UTC()
 	}
-	q.records[key] = record
-	return nil
-}
-
-// Deadletter retires an exhausted record under the same lease fence as
-// Complete. A dead record is never claimed again; it stays visible for
-// operators while blocking no one.
-func (q *InMemoryReapQueue) Deadletter(_ context.Context, claim ReapClaim, diagnostic string, now time.Time) error {
-	if now.IsZero() {
-		return errors.New("runnable reap deadletter time is required")
-	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	key := claim.Record.Request.Key()
-	record, found := q.records[key]
-	if !found {
-		return ErrReapNotFound
-	}
-	if record.State != ReapClaimed || !now.Before(record.LeaseExpires) || record.Attempt != claim.Record.Attempt || record.LeaseOwner != claim.Record.LeaseOwner || record.Request.Revision != claim.Record.Request.Revision || !record.LeaseExpires.Equal(claim.Record.LeaseExpires) {
-		return ErrReapLeaseLost
-	}
-	record.State = ReapDead
-	record.LeaseOwner = ""
-	record.LeaseExpires = time.Time{}
-	record.LastError = boundedReapDiagnostic(diagnostic)
 	q.records[key] = record
 	return nil
 }
