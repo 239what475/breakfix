@@ -127,7 +127,13 @@ func New(ctx context.Context, configPath string) (*Runtime, error) {
 			cleanupDatabase()
 			return nil, fmt.Errorf("parse OpenSandbox workspace provision timeout: %w", err)
 		}
-		generatorWorkspace, err = appgeneration.NewManager(database.Generation, k8sClient, generatorSandbox, appgeneration.Config{
+		workspaceOwner, err := kubernetes.NewGeneratorWorkspaceOwner(k8sClient.RESTConfig(), cfg.OpenSandbox.Namespace)
+		if err != nil {
+			incusClient.Close()
+			cleanupDatabase()
+			return nil, fmt.Errorf("create generator workspace owner client: %w", err)
+		}
+		generatorWorkspace, err = appgeneration.NewManager(database.Generation, k8sClient, generatorSandbox, workspaceOwner, appgeneration.Config{
 			Namespace:        cfg.OpenSandbox.Namespace,
 			Storage:          cfg.OpenSandbox.WorkspaceStorage,
 			ProvisionTimeout: provisionTimeout,

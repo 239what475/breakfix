@@ -46,6 +46,25 @@ type Workspace struct {
 	DeletedAt         *time.Time
 }
 
+// WorkspaceOwner projects the cluster-side ownership facts of one Generator
+// workspace CR. The database row caches these facts; after a schema reset the
+// CR is what a rebuild adopts, never the reverse.
+type WorkspaceOwner struct {
+	ID         string
+	WorkflowID string
+	Namespace  string
+	PVCName    string
+	SandboxID  string
+	State      WorkspaceState
+}
+
+// Rebuildable reports whether the owner carries the full fact set the
+// projection row rebuild requires.
+func (o WorkspaceOwner) Rebuildable() bool {
+	return strings.TrimSpace(o.ID) != "" && strings.TrimSpace(o.WorkflowID) != "" &&
+		strings.TrimSpace(o.Namespace) != "" && strings.TrimSpace(o.PVCName) != ""
+}
+
 // WorkspaceSnapshotTarget joins one active workspace with the latest durable
 // workflow snapshot pointer. The archive bytes remain Server-private.
 type WorkspaceSnapshotTarget struct {

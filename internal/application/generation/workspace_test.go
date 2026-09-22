@@ -148,6 +148,153 @@ func TestManagerLeavesFailedSeedPendingForRetryOrCleanup(t *testing.T) {
 	}
 }
 
+func TestManagerCreatesOwnerBeforePVCAndBackfillsStatus(t *testing.T) {
+	now := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
+	repo := &memoryWorkspaceRepository{}
+	pvcs := &memoryWorkspacePVCs{}
+	owners := &memoryWorkspaceOwners{}
+	sandboxes := &memoryWorkspaceSandboxes{nextID: "sandbox-one"}
+	manager := newWorkspaceManagerWithOwners(t, repo, pvcs, sandboxes, owners, &now)
+
+	record, err := manager.Ensure(context.Background(), "workflow-one", []byte("seed"))
+	if err != nil {
+		t.Fatalf("ensure workspace: %v", err)
+	}
+	if owners.created != 1 {
+		t.Fatalf("owner creation count = %d, want 1", owners.created)
+	}
+	if pvcs.lastOwner.Name != record.ID || pvcs.lastOwner.UID == "" || pvcs.lastOwner.APIVersion != "breakfix.dev/v2" || pvcs.lastOwner.Kind != "GeneratorWorkspace" {
+		t.Fatalf("pvc owner reference = %#v", pvcs.lastOwner)
+	}
+	owner := owners.owners[record.ID]
+	if owner.State != domain.WorkspaceActive || owner.SandboxID != "sandbox-one" || owner.PVCName != record.PVCName {
+		t.Fatalf("activated owner = %#v", owner)
+	}
+	if owners.status < 1 {
+		t.Fatalf("owner status was never backfilled: %#v", owners)
+	}
+}
+
+func TestManagerRetireAndCleanupDriveOwnerToExplicitDeletion(t *testing.T) {
+	now := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
+	repo := &memoryWorkspaceRepository{}
+	pvcs := &memoryWorkspacePVCs{}
+	owners := &memoryWorkspaceOwners{}
+	sandboxes := &memoryWorkspaceSandboxes{nextID: "sandbox-one"}
+	manager := newWorkspaceManagerWithOwners(t, repo, pvcs, sandboxes, owners, &now)
+
+	first, err := manager.Ensure(context.Background(), "workflow-one", []byte("seed"))
+	if err != nil {
+		t.Fatalf("ensure workspace: %v", err)
+	}
+	if err := manager.Retire(context.Background(), "workflow-one"); err != nil {
+		t.Fatalf("retire workspace: %v", err)
+	}
+	if owners.owners[first.ID].State != domain.WorkspaceDeleting {
+		t.Fatalf("retired owner = %#v", owners.owners[first.ID])
+	}
+	if err := manager.Cleanup(context.Background(), first.ID); err != nil {
+		t.Fatalf("cleanup workspace: %v", err)
+	}
+	if owners.deleted != 1 {
+		t.Fatalf("owner deletion count = %d, want 1", owners.deleted)
+	}
+	if _, exists := owners.owners[first.ID]; exists {
+		t.Fatal("owner survived cleanup")
+	}
+	if err := manager.Cleanup(context.Background(), first.ID); err != nil {
+		t.Fatalf("cleanup already deleted workspace: %v", err)
+	}
+	if owners.deleted != 1 {
+		t.Fatalf("terminal cleanup repeated owner deletion: %d", owners.deleted)
+	}
+}
+
+func TestManagerCompensationRewritesOwnerAfterSandboxDelete(t *testing.T) {
+	now := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
+	repo := &failingActivationRepository{memoryWorkspaceRepository: &memoryWorkspaceRepository{}, fail: true}
+	pvcs := &memoryWorkspacePVCs{}
+	owners := &memoryWorkspaceOwners{}
+	sandboxes := &memoryWorkspaceSandboxes{nextID: "sandbox-one"}
+	manager := newWorkspaceManagerWithOwners(t, repo, pvcs, sandboxes, owners, &now)
+
+	if _, err := manager.Ensure(context.Background(), "workflow-one", []byte("seed")); err == nil {
+		t.Fatal("activate failure unexpectedly succeeded")
+	}
+	record, err := repo.GetCurrentGeneratorWorkspace(context.Background(), "workflow-one")
+	if err != nil || record.State != domain.WorkspacePending {
+		t.Fatalf("pending record = %#v, err=%v", record, err)
+	}
+	owner := owners.owners[record.ID]
+	if owner.State != domain.WorkspacePending || owner.SandboxID != "" {
+		t.Fatalf("compensated owner = %#v", owner)
+	}
+}
+
+// failingActivationRepository injects an ActivateGeneratorWorkspace failure so
+// the compensation path (Sandbox delete plus owner rewrite) is exercised.
+type failingActivationRepository struct {
+	*memoryWorkspaceRepository
+	fail bool
+}
+
+func (r *failingActivationRepository) ActivateGeneratorWorkspace(ctx context.Context, id, sandboxID string, now time.Time) error {
+	if r.fail {
+		return errors.New("record unavailable")
+	}
+	return r.memoryWorkspaceRepository.ActivateGeneratorWorkspace(ctx, id, sandboxID, now)
+}
+
+func TestManagerAdoptsOwnerWithoutRowAndDropsIt(t *testing.T) {
+	now := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
+	repo := &memoryWorkspaceRepository{}
+	pvcs := &memoryWorkspacePVCs{}
+	owners := &memoryWorkspaceOwners{}
+	sandboxes := &memoryWorkspaceSandboxes{nextID: "sandbox-live"}
+	manager := newWorkspaceManagerWithOwners(t, repo, pvcs, sandboxes, owners, &now)
+
+	live, err := manager.Ensure(context.Background(), "workflow-live", []byte("seed"))
+	if err != nil {
+		t.Fatalf("ensure live workspace: %v", err)
+	}
+	// An orphaned owner has no database row: it predates a destructive schema
+	// migration, or the row it belonged to was reset away.
+	owners.owners["generator-workspace-orphan"] = domain.WorkspaceOwner{
+		ID: "generator-workspace-orphan", WorkflowID: "workflow-orphan", Namespace: "opensandbox",
+		PVCName: "breakfix-workspace-orphan", SandboxID: "sandbox-orphan", State: domain.WorkspaceActive,
+	}
+	pvcs.claims = map[string]struct{}{"opensandbox/breakfix-workspace-orphan": {}}
+
+	if err := manager.AdoptOrphanedOwners(context.Background()); err != nil {
+		t.Fatalf("adopt orphaned owners: %v", err)
+	}
+	adopted, err := repo.GetGeneratorWorkspace(context.Background(), "generator-workspace-orphan")
+	if err != nil || adopted.State != domain.WorkspaceDeleting || adopted.SandboxID != "sandbox-orphan" {
+		t.Fatalf("adopted row = %#v, err=%v", adopted, err)
+	}
+	if owners.owners["generator-workspace-orphan"].State != domain.WorkspaceDeleting {
+		t.Fatalf("adopted owner = %#v", owners.owners["generator-workspace-orphan"])
+	}
+	intact, err := repo.GetGeneratorWorkspace(context.Background(), live.ID)
+	if err != nil || intact.State != domain.WorkspaceActive {
+		t.Fatalf("live row was not left untouched: %#v, err=%v", intact, err)
+	}
+	// The rebuilt deleting row funnels into the regular cleanup, which drops
+	// the adopted resources and deletes the owner explicitly.
+	if err := manager.CleanupDue(context.Background()); err != nil {
+		t.Fatalf("cleanup adopted workspace: %v", err)
+	}
+	if _, exists := owners.owners["generator-workspace-orphan"]; exists {
+		t.Fatal("adopted owner survived cleanup")
+	}
+	if _, exists := owners.owners[live.ID]; !exists {
+		t.Fatal("live owner was dropped by adoption cleanup")
+	}
+	if sandboxes.deleted != 1 || pvcs.deleted != 1 {
+		t.Fatalf("adopted resource drop = sandboxes:%d pvcs:%d, want 1/1", sandboxes.deleted, pvcs.deleted)
+	}
+}
+
 func TestWorkspaceReaperRetiresRestartedWorkspaceBeforeAsynchronousCleanup(t *testing.T) {
 	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 	repo := &memoryWorkspaceRepository{}
@@ -196,9 +343,14 @@ func TestWorkspaceReaperRetiresRestartedWorkspaceBeforeAsynchronousCleanup(t *te
 	}
 }
 
-func newWorkspaceManager(t *testing.T, repo *memoryWorkspaceRepository, pvcs *memoryWorkspacePVCs, sandboxes *memoryWorkspaceSandboxes, now *time.Time) *Manager {
+func newWorkspaceManager(t *testing.T, repo WorkspaceRepository, pvcs *memoryWorkspacePVCs, sandboxes *memoryWorkspaceSandboxes, now *time.Time) *Manager {
 	t.Helper()
-	manager, err := NewManager(repo, pvcs, sandboxes, Config{Namespace: "opensandbox", Storage: "1Gi", ProvisionTimeout: time.Minute})
+	return newWorkspaceManagerWithOwners(t, repo, pvcs, sandboxes, &memoryWorkspaceOwners{}, now)
+}
+
+func newWorkspaceManagerWithOwners(t *testing.T, repo WorkspaceRepository, pvcs *memoryWorkspacePVCs, sandboxes *memoryWorkspaceSandboxes, owners *memoryWorkspaceOwners, now *time.Time) *Manager {
+	t.Helper()
+	manager, err := NewManager(repo, pvcs, sandboxes, owners, Config{Namespace: "opensandbox", Storage: "1Gi", ProvisionTimeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,10 +679,11 @@ func (r *memoryWorkspaceRepository) snapshotDigest(workflowID string) string {
 
 type memoryWorkspacePVCs struct {
 	claims           map[string]struct{}
+	lastOwner        WorkspaceOwnerReference
 	created, deleted int
 }
 
-func (p *memoryWorkspacePVCs) EnsureWorkspacePVC(ctx context.Context, namespace, name, _ string, _ string) error {
+func (p *memoryWorkspacePVCs) EnsureWorkspacePVC(ctx context.Context, namespace, name, _ string, _ string, owner WorkspaceOwnerReference) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -542,6 +695,7 @@ func (p *memoryWorkspacePVCs) EnsureWorkspacePVC(ctx context.Context, namespace,
 		p.claims[key] = struct{}{}
 		p.created++
 	}
+	p.lastOwner = owner
 	return nil
 }
 func (p *memoryWorkspacePVCs) DeleteWorkspacePVC(_ context.Context, namespace, name string) error {
@@ -551,6 +705,67 @@ func (p *memoryWorkspacePVCs) DeleteWorkspacePVC(_ context.Context, namespace, n
 		p.deleted++
 	}
 	return nil
+}
+
+// memoryWorkspaceOwners records the owner CR lifecycle the Manager drives:
+// creation before provisioning, status backfills, retire markings, and the
+// explicit deletion that ends the ownership.
+type memoryWorkspaceOwners struct {
+	owners                 map[string]domain.WorkspaceOwner
+	created, status, count int
+	retired, deleted       int
+}
+
+func (o *memoryWorkspaceOwners) EnsureWorkspaceOwner(_ context.Context, record domain.Workspace) (WorkspaceOwnerReference, error) {
+	if o.owners == nil {
+		o.owners = make(map[string]domain.WorkspaceOwner)
+	}
+	if _, exists := o.owners[record.ID]; !exists {
+		o.owners[record.ID] = domain.WorkspaceOwner{
+			ID: record.ID, WorkflowID: record.WorkflowID, Namespace: record.Namespace,
+			PVCName: record.PVCName, SandboxID: record.SandboxID, State: record.State,
+		}
+		o.created++
+	}
+	return WorkspaceOwnerReference{APIVersion: "breakfix.dev/v2", Kind: "GeneratorWorkspace", Name: record.ID, UID: "uid-" + record.ID}, nil
+}
+
+func (o *memoryWorkspaceOwners) RecordWorkspaceOwnerStatus(_ context.Context, record domain.Workspace) error {
+	o.status++
+	if o.owners == nil {
+		o.owners = make(map[string]domain.WorkspaceOwner)
+	}
+	o.owners[record.ID] = domain.WorkspaceOwner{
+		ID: record.ID, WorkflowID: record.WorkflowID, Namespace: record.Namespace,
+		PVCName: record.PVCName, SandboxID: record.SandboxID, State: record.State,
+	}
+	return nil
+}
+
+func (o *memoryWorkspaceOwners) RetireWorkspaceOwner(_ context.Context, workspaceID string) error {
+	if record, exists := o.owners[workspaceID]; exists {
+		record.State = domain.WorkspaceDeleting
+		o.owners[workspaceID] = record
+		o.retired++
+	}
+	return nil
+}
+
+func (o *memoryWorkspaceOwners) DeleteWorkspaceOwner(_ context.Context, workspaceID string) error {
+	if _, exists := o.owners[workspaceID]; exists {
+		delete(o.owners, workspaceID)
+		o.deleted++
+	}
+	return nil
+}
+
+func (o *memoryWorkspaceOwners) ListWorkspaceOwners(context.Context) ([]domain.WorkspaceOwner, error) {
+	o.count++
+	result := make([]domain.WorkspaceOwner, 0, len(o.owners))
+	for _, record := range o.owners {
+		result = append(result, record)
+	}
+	return result, nil
 }
 
 type memoryWorkspaceSandboxes struct {

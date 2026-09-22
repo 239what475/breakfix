@@ -11,6 +11,16 @@ import (
 	"github.com/breakfix/breakfix/internal/content/workspacearchive"
 )
 
+func TestWorkspaceMetadataTagsAppAndWorkspace(t *testing.T) {
+	metadata := workspaceMetadata(" generator-workspace-1 ")
+	if metadata[workspaceAppMetadataKey] != workspaceAppMetadataValue {
+		t.Fatalf("app metadata = %q, want %q", metadata[workspaceAppMetadataKey], workspaceAppMetadataValue)
+	}
+	if metadata[workspaceIDMetadataKey] != "generator-workspace-1" {
+		t.Fatalf("workspace metadata = %q", metadata[workspaceIDMetadataKey])
+	}
+}
+
 func TestProviderFileModeUsesOpenSandboxOctalNotation(t *testing.T) {
 	for _, test := range []struct {
 		mode int

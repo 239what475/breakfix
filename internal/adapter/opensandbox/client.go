@@ -22,7 +22,21 @@ import (
 
 const workspaceMountPath = "/workspace"
 
-const workspaceIDMetadataKey = "breakfix.generator_workspace_id"
+const (
+	workspaceIDMetadataKey    = "breakfix.generator_workspace_id"
+	workspaceAppMetadataKey   = "breakfix.app"
+	workspaceAppMetadataValue = "generator"
+)
+
+// workspaceMetadata tags every Server-created Sandbox with its workspace ID
+// and the owning application. The app key scopes the leak-sanitizer's list to
+// exactly this application's sandboxes, never the whole account.
+func workspaceMetadata(workspaceID string) map[string]string {
+	return map[string]string{
+		workspaceAppMetadataKey: workspaceAppMetadataValue,
+		workspaceIDMetadataKey:  strings.TrimSpace(workspaceID),
+	}
+}
 
 type Client struct {
 	connection sdk.ConnectionConfig
@@ -95,7 +109,7 @@ func (c *Client) CreateWorkspace(ctx context.Context, pvcName, workspaceID strin
 		Image:          &sdk.ImageSpec{URI: c.image},
 		Entrypoint:     []string{"sh", "-c", "while true; do sleep 3600; done"},
 		ResourceLimits: sdk.ResourceLimits{"cpu": c.cpu, "memory": c.memory},
-		Metadata:       map[string]string{workspaceIDMetadataKey: strings.TrimSpace(workspaceID)},
+		Metadata:       workspaceMetadata(workspaceID),
 		NetworkPolicy:  &sdk.NetworkPolicy{DefaultAction: "deny"},
 		Volumes: []sdk.Volume{{
 			Name:      "workspace",

@@ -33,8 +33,12 @@ func (r *WorkspaceReaper) Recover(ctx context.Context) error {
 	// A Server restart never resumes a remotely executing Generator turn.
 	// Retire records first; Run performs the provider cleanup asynchronously so
 	// the next user turn can allocate a distinct PVC/Sandbox immediately.
-	_, err := r.manager.repo.RetireIncompleteGeneratorWorkspaces(ctx, r.manager.now())
-	return err
+	if _, err := r.manager.repo.RetireIncompleteGeneratorWorkspaces(ctx, r.manager.now()); err != nil {
+		return err
+	}
+	// Workspace CRs the database lost (destructive schema migration) are
+	// adopted as deleting rows so their resources cannot outlive the reset.
+	return r.manager.AdoptOrphanedOwners(ctx)
 }
 
 func (r *WorkspaceReaper) Run(ctx context.Context) error {
