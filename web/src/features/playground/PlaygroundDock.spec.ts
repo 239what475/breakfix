@@ -17,8 +17,8 @@ vi.mock("../workspace/TerminalPane.vue", () => ({
 	default: { name: "TerminalPane", props: ["terminalId", "runtime", "nodes", "visible", "channel", "closeWindow"], template: '<div class="terminal-stub"></div>' },
 }));
 
-function environmentAt(state: PlaygroundEnvironment["state"]): PlaygroundEnvironment {
-	return { state, environment_id: "environment-1", runtime: "k8s" };
+function environmentAt(state: PlaygroundEnvironment["state"], generation = 0): PlaygroundEnvironment {
+  return { state, environment_id: "environment-1", runtime: "k8s", generation };
 }
 
 async function dockAt(state: PlaygroundEnvironment["state"]) {
@@ -73,22 +73,24 @@ describe("PlaygroundDock", () => {
 		}
 	});
 
-	it("does not trust a ready read that predates the reset wipe", async () => {
+	it("does not trust a ready that still reports the pre-wipe generation", async () => {
 		vi.useFakeTimers();
 		try {
-			vi.mocked(api.getPlayground).mockResolvedValue(environmentAt("ready"));
+			vi.mocked(api.getPlayground).mockResolvedValue(environmentAt("ready", 0));
 			const wrapper = mount(PlaygroundDock, {});
 			await flushPromises();
 			await wrapper.get("button.playground-fab").trigger("click");
 
-			vi.mocked(api.resetPlayground).mockResolvedValue(environmentAt("creating"));
+			// The reset POST answers the optimistic projection: creating, but
+			// still carrying the pre-wipe generation.
+			vi.mocked(api.resetPlayground).mockResolvedValue(environmentAt("creating", 0));
 			await verb(wrapper, "Reset")!.trigger("click");
 			await flushPromises();
 
-			// The controller has not picked the nonce up yet: the first GET
-			// still reads the pre-reset Ready. The loop must continue and the
-			// ball must not flash the old session back as ready.
-			vi.mocked(api.getPlayground).mockResolvedValue(environmentAt("ready"));
+			// The controller has not adopted the wipe yet, so the GET can still
+			// read the old session as ready — same generation. That ready is
+			// the pre-wipe terminal and must not settle the loop.
+			vi.mocked(api.getPlayground).mockResolvedValue(environmentAt("ready", 0));
 			await vi.advanceTimersByTimeAsync(2_100);
 			await flushPromises();
 			expect(wrapper.get("button.playground-fab").attributes("data-state")).toBe("creating");
@@ -97,11 +99,11 @@ describe("PlaygroundDock", () => {
 			await vi.advanceTimersByTimeAsync(2_100);
 			expect(api.getPlayground).toHaveBeenCalled();
 
-			// Once a GET observes creating, the ready that follows is final
-			// and the loop settles.
-			vi.mocked(api.getPlayground).mockResolvedValue(environmentAt("creating"));
+			// The adoption moves the generation; the ready that follows belongs
+			// to the wiped environment and settles the loop.
+			vi.mocked(api.getPlayground).mockResolvedValue(environmentAt("creating", 1));
 			await vi.advanceTimersByTimeAsync(2_100);
-			vi.mocked(api.getPlayground).mockResolvedValue(environmentAt("ready"));
+			vi.mocked(api.getPlayground).mockResolvedValue(environmentAt("ready", 1));
 			await vi.advanceTimersByTimeAsync(2_100);
 			await flushPromises();
 			const settled = vi.mocked(api.getPlayground).mock.calls.length;

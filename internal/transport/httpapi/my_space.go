@@ -106,13 +106,20 @@ func (h *Handler) mySpace(ctx context.Context, user *postgres.User, learningLimi
 				expires := env.ExpiresAt.UTC()
 				expiresAt = &expires
 			}
-			active = append(active, api.MySpaceActiveEnvironment{
+			playground := api.MySpaceActiveEnvironment{
 				EnvironmentId: env.Name,
 				Kind:          api.MySpaceActiveEnvironmentKindPlayground,
 				Runtime:       api.MySpaceActiveEnvironmentRuntime(runtimeName),
 				Phase:         string(env.Phase),
 				ExpiresAt:     expiresAt,
-			})
+			}
+			// A reset keeps the stale Ready phase until the rebuilt terminal
+			// reports Ready; the row must read as resetting, not ready.
+			if env.Operation == runtimev2.OperationResetting {
+				operation := api.MySpaceActiveEnvironmentOperation(env.Operation)
+				playground.Operation = &operation
+			}
+			active = append(active, playground)
 			continue
 		}
 		if env.Phase != runtimev2.PhaseReady && env.Phase != runtimev2.PhaseDraining {

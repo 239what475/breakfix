@@ -17,6 +17,9 @@ function sourceLabel(source: string | undefined) {
 const phaseLabels: Record<string, string> = { Pending: "Preparing", Provisioning: "Preparing", Ready: "Ready", Draining: "Draining" };
 
 function phaseLabel(environment: MySpaceActiveEnvironment) {
+  // A resetting playground keeps its stale Ready phase until the rebuilt
+  // terminal reports Ready; the row must say so instead of ready.
+  if (environment.operation === "Resetting") return "Resetting";
   return phaseLabels[environment.phase] ?? environment.phase;
 }
 

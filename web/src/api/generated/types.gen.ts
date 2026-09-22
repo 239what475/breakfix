@@ -161,7 +161,7 @@ export type AdminRunnableActionPage = {
 
 export type AdminRunnableReap = {
     reap_key: string;
-    state: 'queued' | 'claimed' | 'succeeded';
+    state: 'queued' | 'claimed' | 'succeeded' | 'dead';
     attempt: number;
     last_error: string;
     next_attempt_at: string;
@@ -308,6 +308,10 @@ export type MySpaceActiveEnvironment = {
     scenario?: MySpaceScenario;
     runtime: 'node' | 'k8s';
     phase: string;
+    /**
+     * present when a lifecycle operation is in flight; a Resetting playground row renders as resetting rather than its stale ready phase
+     */
+    operation?: 'None' | 'Resetting';
     checkpoint_progress?: CheckpointProgressSummary;
     expires_at?: string | null;
 };

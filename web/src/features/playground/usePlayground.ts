@@ -35,11 +35,12 @@ export function usePlayground(notify: Notify) {
 
   const sessionOpen = computed(() => state.value !== "none");
 
-  // A reset POST reports creating optimistically while the controller has not
-  // picked the nonce up yet: the first GET may still read the pre-reset
-  // Ready and would stop the poll loop before the wipe happens. Until some
-  // GET observes creating, a ready read after a reset is not final.
-  let resetWipePending = false;
+  // A reset is generational: the click pins the environment's identity and
+  // generation, and a ready read only counts once the reported generation has
+  // moved past the pin. A ready that still carries the clicked generation is
+  // the pre-wipe session — the controller has not adopted the wipe yet — so
+  // the loop keeps waiting instead of flashing the old session back.
+  let resetWipePending: { environmentId: string; generation: number } | null = null;
 
   function stopPolling() {
     pollEpoch += 1;
@@ -56,19 +57,29 @@ export function usePlayground(notify: Notify) {
     else runtime.value = "k8s";
   }
 
+  function staleReady(environment: PlaygroundEnvironment) {
+    return (
+      resetWipePending !== null &&
+      environment.environment_id === resetWipePending.environmentId &&
+      (environment.generation ?? 0) <= resetWipePending.generation
+    );
+  }
+
   function adoptAndSchedule(environment: PlaygroundEnvironment, epoch: number) {
     adopt(environment);
     if (epoch !== pollEpoch) return;
-    if (state.value === "ready" && resetWipePending) {
-      // The pre-wipe read is stale by design: the POST already committed to a
-      // wipe, so the ball keeps showing creating instead of flashing the old
-      // Ready session back for one poll interval.
+    if (state.value === "ready" && staleReady(environment)) {
+      // The pre-wipe generation is still answering: the ball keeps showing
+      // creating until a ready belongs to the wiped generation.
       state.value = "creating";
       pollTimer = window.setTimeout(() => void pollOnce(epoch), pollInterval);
       return;
     }
+    if (state.value === "ready") {
+      resetWipePending = null;
+      return;
+    }
     if (state.value === "creating") {
-      resetWipePending = false;
       pollTimer = window.setTimeout(() => void pollOnce(epoch), pollInterval);
     }
   }
@@ -127,10 +138,13 @@ export function usePlayground(notify: Notify) {
     try {
       const environment = await api.resetPlayground();
       if (epoch !== pollEpoch) return;
-      // The POST response is the optimistic projection above, not an
-      // observation: only a GET that reads creating proves the controller
-      // picked the wipe up, so the schedule starts with the flag armed.
-      resetWipePending = true;
+      // The POST response is the optimistic projection, not an observation:
+      // it still reports the pre-wipe generation. Pinning that generation
+      // here is what makes a later ready trustworthy or stale.
+      resetWipePending = {
+        environmentId: environment.environment_id ?? "",
+        generation: environment.generation ?? 0,
+      };
       adopt(environment);
       pollTimer = window.setTimeout(() => void pollOnce(epoch), pollInterval);
       notify("Playground reset.", "info");
@@ -147,9 +161,11 @@ export function usePlayground(notify: Notify) {
     stopping.value = true;
     stopPolling();
     // Optimistic: the dock leaves the session right away while the server
-    // drains and deletes the environment in the background.
+    // drains and deletes the environment in the background. The wipe pin
+    // belongs to the old session and never gates a future one.
     state.value = "none";
     environmentId.value = "";
+    resetWipePending = null;
     try {
       await api.closePlayground();
     } catch (error) {

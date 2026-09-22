@@ -45,6 +45,7 @@ const reaps: AdminRunnableReapList = {
 	reaps: [
 		{ reap_key: "breakfix-system/environment-1/uid-1", state: "queued", attempt: 2, last_error: "namespace ownership metadata mismatch", next_attempt_at: new Date(Date.now() + 60_000).toISOString(), updated_at: new Date(Date.now() - 1000).toISOString() },
 		{ reap_key: "breakfix-system/environment-2/uid-2", state: "succeeded", attempt: 1, last_error: "", next_attempt_at: new Date(Date.now() - 60_000).toISOString(), updated_at: new Date(Date.now() - 120_000).toISOString() },
+		{ reap_key: "breakfix-system/environment-3/uid-3", state: "dead", attempt: 20, last_error: "reap attempts exhausted: provider unavailable", next_attempt_at: new Date(Date.now() - 3_600_000).toISOString(), updated_at: new Date(Date.now() - 3_600_000).toISOString() },
 	],
 };
 
@@ -89,9 +90,17 @@ describe("AdminEnvironmentsPage", () => {
 		await flushPromises();
 
 		const rows = page.findAll(".admin-reap-table tbody tr");
-		expect(rows).toHaveLength(2);
+		expect(rows).toHaveLength(3);
 		expect(rows[0].text()).toContain("namespace ownership metadata mismatch");
 		expect(rows[0].text()).toContain("2");
+
+		// A dead reap is a terminal dead-letter: the badge names the state and
+		// no next attempt is promised anymore.
+		const deadBadge = rows[2].get(".admin-phase-badge");
+		expect(deadBadge.attributes("data-state")).toBe("dead");
+		expect(deadBadge.text()).toBe("dead");
+		expect(rows[2].text()).toContain("reap attempts exhausted");
+		expect(rows[2].findAll("td")[4].text()).toBe("—");
 	});
 
 	it("filters the table by phase", async () => {
@@ -109,7 +118,7 @@ describe("AdminEnvironmentsPage", () => {
 		const page = mountPage();
 		await flushPromises();
 
-		const stuck = page.findAll(".admin-row-stuck");
+		const stuck = page.findAll(".admin-environment-table .admin-row-stuck");
 		expect(stuck).toHaveLength(2);
 		expect(stuck[0].text()).toContain("playground-u-old");
 		expect(stuck[1].text()).toContain("challenge-u-one");

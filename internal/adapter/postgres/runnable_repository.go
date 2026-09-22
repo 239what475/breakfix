@@ -908,6 +908,26 @@ func (d *RunnableRepository) Complete(ctx context.Context, claim runnable.ReapCl
 	return nil
 }
 
+// Deadletter retires an exhausted reap under the same lease fence as a
+// completion. A dead row is terminal: the claim scan never picks it up again,
+// and the observation surface keeps it readable for operators.
+func (d *RunnableRepository) Deadletter(ctx context.Context, claim runnable.ReapClaim, diagnostic string, now time.Time) error {
+	if err := claim.Record.Request.Valid(); err != nil || now.IsZero() || !now.Before(claim.Record.LeaseExpires) {
+		return runnable.ErrReapLeaseLost
+	}
+	result, err := d.conn.ExecContext(ctx, `UPDATE runnable_reaps SET state = ?, lease_owner = '', lease_expires_at = NULL,
+		last_error = ?, updated_at = ?
+		WHERE reap_key = ? AND state = ? AND attempt = ? AND lease_owner = ? AND lease_expires_at = ? AND runnable_revision_digest = ? AND lease_expires_at > ?`,
+		runnable.ReapDead, truncateRunnableDiagnostic(diagnostic), now.UTC(), claim.Record.Request.Key(), runnable.ReapClaimed, claim.Record.Attempt, claim.Record.LeaseOwner, claim.Record.LeaseExpires.UTC(), claim.Record.Request.Revision, now.UTC())
+	if err != nil {
+		return fmt.Errorf("deadletter runnable reap: %w", err)
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return runnable.ErrReapLeaseLost
+	}
+	return nil
+}
+
 const runnableReapColumns = `reap_key, runnable_revision_digest, reap_request, state, attempt, lease_owner, lease_expires_at,
 	next_attempt_at, last_error, created_at, updated_at, completed_at`
 const runnableReapSelect = `SELECT ` + runnableReapColumns + ` FROM runnable_reaps`
@@ -926,7 +946,7 @@ func scanRunnableReap(row agentRow) (runnable.ReapRecord, error) {
 	if err := json.Unmarshal(request, &record.Request); err != nil {
 		return runnable.ReapRecord{}, fmt.Errorf("decode runnable reap request: %w", err)
 	}
-	if record.Request.Key() != key || record.Request.Revision != digest || (state != runnable.ReapQueued && state != runnable.ReapClaimed && state != runnable.ReapSucceeded) {
+	if record.Request.Key() != key || record.Request.Revision != digest || (state != runnable.ReapQueued && state != runnable.ReapClaimed && state != runnable.ReapSucceeded && state != runnable.ReapDead) {
 		return runnable.ReapRecord{}, errors.New("stored runnable reap is inconsistent")
 	}
 	if err := record.Request.Valid(); err != nil {

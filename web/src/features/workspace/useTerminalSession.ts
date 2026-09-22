@@ -72,8 +72,12 @@ export function useTerminalSession(
     );
   }
 
+  // Teardown must not leave a stale "connected" behind: Connected promises an
+  // open socket, so a locally disposed session reports disconnected right away
+  // instead of waiting for the next connect to correct it.
   function disconnect() {
     epoch += 1;
+    const wasLive = socket !== undefined || terminal !== undefined;
     observer?.disconnect();
     observer = undefined;
     input?.dispose();
@@ -83,6 +87,10 @@ export function useTerminalSession(
     terminal?.dispose();
     terminal = undefined;
     fit = undefined;
+    if (wasLive && (state.value === "connected" || state.value === "connecting")) {
+      state.value = "disconnected";
+      stateMessage.value = "Terminal disconnected. Reconnect to resume this tmux window.";
+    }
   }
 
   async function connect() {
@@ -124,6 +132,8 @@ export function useTerminalSession(
     fit.fit();
     let ticket: string;
     try {
+      // Every connect — first attach or reconnect — mints a fresh one-time
+      // ticket: a reused ticket must never resurrect a dead session.
       ticket = await link.ticket(window, node || undefined);
     } catch (error) {
       if (currentEpoch !== epoch) return;

@@ -12,7 +12,33 @@ import (
 const (
 	defaultReaperLeaseTTL = 30 * time.Second
 	defaultReaperRetry    = 5 * time.Second
+	// Failed retries back off exponentially from the base delay, capped so a
+	// stuck provider cannot hold the queue hostage; attempts are bounded and
+	// the record retires to the dead terminal state instead of retrying
+	// forever (5s..5m over 20 attempts is roughly 75 minutes end to end).
+	reaperRetryCap       = 5 * time.Minute
+	reaperMaxAttempts    = 20
+	reaperDeadDiagnostic = "reap attempts exhausted"
 )
+
+// reaperRetryDelay doubles the base delay after each failed attempt and caps
+// it, so the queue drains fast for transient errors and slowly for stuck ones.
+func reaperRetryDelay(base time.Duration, attempt int64) time.Duration {
+	if base <= 0 {
+		base = defaultReaperRetry
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := base
+	for range attempt - 1 {
+		delay *= 2
+		if delay >= reaperRetryCap {
+			return reaperRetryCap
+		}
+	}
+	return delay
+}
 
 type ReapRequest = runnable.ReapRequest
 type ReapRecord = runnable.ReapRecord
@@ -24,6 +50,7 @@ const (
 	ReapQueued    = runnable.ReapQueued
 	ReapClaimed   = runnable.ReapClaimed
 	ReapSucceeded = runnable.ReapSucceeded
+	ReapDead      = runnable.ReapDead
 )
 
 var (
@@ -83,6 +110,15 @@ func (r *Reaper) RunOnce(ctx context.Context) (bool, error) {
 	retry := r.Retry
 	if retry <= 0 {
 		retry = defaultReaperRetry
+	}
+	if !success {
+		if claim.Record.Attempt >= reaperMaxAttempts {
+			if err := r.Queue.Deadletter(ctx, *claim, reaperDeadDiagnostic+": "+diagnostic, r.now()); err != nil {
+				return true, err
+			}
+			return true, nil
+		}
+		retry = reaperRetryDelay(retry, claim.Record.Attempt)
 	}
 	if err := r.Queue.Complete(ctx, *claim, success, diagnostic, r.now(), r.now().Add(retry)); err != nil {
 		return true, err

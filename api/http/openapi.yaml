@@ -1540,7 +1540,7 @@ components:
           type: string
         state:
           type: string
-          enum: [queued, claimed, succeeded]
+          enum: [queued, claimed, succeeded, dead]
         attempt:
           type: integer
         last_error:
@@ -1806,6 +1806,10 @@ components:
           enum: [node, k8s]
         phase:
           type: string
+        operation:
+          type: string
+          enum: [None, Resetting]
+          description: present when a lifecycle operation is in flight; a Resetting playground row renders as resetting rather than its stale ready phase
         checkpoint_progress:
           $ref: "#/components/schemas/CheckpointProgressSummary"
         expires_at:

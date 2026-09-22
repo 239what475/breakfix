@@ -181,6 +181,84 @@ func TestRunnableRepositoryPersistsImmutableValuesAndReapLease(t *testing.T) {
 	}
 }
 
+// A reap that keeps failing stores the caller's backoff schedule verbatim,
+// and the dead-letter transition retires the record under the same lease
+// fence: dead rows survive the scan and never claim again.
+func TestRunnableRepositoryDeadlettersExhaustedReaps(t *testing.T) {
+	database := newTestDB(t)
+	ctx := context.Background()
+	revision := testRunnableRevision(t)
+	revisionDigest, err := revision.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := runnable.ReapRequest{
+		Namespace: "breakfix-system", Name: "environment-dead", UID: "environment-dead-uid", Revision: revisionDigest,
+		Binding: runnable.EnvironmentBinding{Namespace: "breakfix-system", Name: "environment-dead", UID: "environment-dead-uid", Purpose: runnable.PurposeVerification, RunnableRevision: revision},
+	}
+	if err := database.Runnable.Enqueue(ctx, request); err != nil {
+		t.Fatalf("enqueue reap: %v", err)
+	}
+
+	// The repository stores the retry schedule it is handed — the reaper owns
+	// the exponential sequence — and a failed attempt stays queued. The clock
+	// starts after the enqueue so the initial next_attempt_at is due.
+	clock := time.Now().UTC().Truncate(time.Microsecond)
+	for attempt := 1; attempt <= 3; attempt++ {
+		claim, err := database.Runnable.Claim(ctx, "reaper-a", time.Minute, clock)
+		if err != nil || claim == nil {
+			t.Fatalf("claim attempt %d = %#v, %v", attempt, claim, err)
+		}
+		if claim.Record.Attempt != int64(attempt) {
+			t.Fatalf("claim attempt = %d, want %d", claim.Record.Attempt, attempt)
+		}
+		next := clock.Add(time.Duration(attempt) * 5 * time.Second)
+		if err := database.Runnable.Complete(ctx, *claim, false, "provider unavailable", clock, next); err != nil {
+			t.Fatalf("complete failed attempt %d: %v", attempt, err)
+		}
+		clock = next
+	}
+	record, err := database.Runnable.Get(ctx, request.Key())
+	if err != nil || record.State != runnable.ReapQueued || record.Attempt != 3 || record.LastError != "provider unavailable" || !record.NextAttemptAt.Equal(clock) {
+		t.Fatalf("backoff record = %#v, %v", record, err)
+	}
+
+	// The exhausted attempt retires to dead; the fence still guards it.
+	claim, err := database.Runnable.Claim(ctx, "reaper-a", time.Minute, clock)
+	if err != nil || claim == nil {
+		t.Fatalf("exhausted claim = %#v, %v", claim, err)
+	}
+	if err := database.Runnable.Deadletter(ctx, *claim, "reap attempts exhausted: provider unavailable", clock.Add(time.Second)); err != nil {
+		t.Fatalf("deadletter reap: %v", err)
+	}
+	record, err = database.Runnable.Get(ctx, request.Key())
+	if err != nil || record.State != runnable.ReapDead || record.LeaseOwner != "" || !strings.Contains(record.LastError, "reap attempts exhausted") {
+		t.Fatalf("dead record = %#v, %v", record, err)
+	}
+	if err := database.Runnable.Deadletter(ctx, *claim, "stale", clock.Add(2*time.Second)); !errors.Is(err, runnable.ErrReapLeaseLost) {
+		t.Fatalf("stale deadletter error = %v, want lease lost", err)
+	}
+
+	// A dead record is terminal for the claim scan yet stays observable.
+	late, err := database.Runnable.Claim(ctx, "reaper-b", time.Minute, clock.Add(time.Hour))
+	if err != nil || late != nil {
+		t.Fatalf("dead claim = %#v, %v, want nothing claimable", late, err)
+	}
+	observations, err := database.Runnable.ListRunnableReapObservations(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, observation := range observations {
+		if observation.ReapKey == request.Key() && observation.State == runnable.ReapDead {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("dead reap missing from observations: %#v", observations)
+	}
+}
+
 func testRunnableRevision(t *testing.T) runnable.RunnableRevision {
 	t.Helper()
 	spec := runnable.RunnableSpec{

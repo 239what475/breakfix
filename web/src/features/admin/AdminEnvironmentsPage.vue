@@ -152,7 +152,7 @@ async function confirmRelease() {
 		</div>
 
 		<h3 class="admin-subsection-title">回收队列</h3>
-		<p class="admin-subsection-note">环境拆除的持久队列;失败行持续重试,`succeeded` 为已完成。</p>
+		<p class="admin-subsection-note">环境拆除的持久队列;失败行指数退避重试,`succeeded` 为已完成,`dead` 为尝试耗尽的死信(仅泄漏资源,不阻塞用户,人工跟进)。</p>
 		<p v-if="!reaps.length" class="admin-empty">队列为空。</p>
 		<div v-else class="admin-table-wrap">
 			<table class="admin-table admin-reap-table">
@@ -165,7 +165,8 @@ async function confirmRelease() {
 						<td><span class="admin-phase-badge" :data-state="reap.state">{{ reap.state }}</span></td>
 						<td>{{ reap.attempt }}</td>
 						<td><span class="admin-failure-note" :title="reap.last_error">{{ reap.last_error || "—" }}</span></td>
-						<td><span :title="clock(reap.next_attempt_at)">{{ relative(reap.next_attempt_at) }}</span></td>
+						<td v-if="reap.state === 'dead'">—</td>
+						<td v-else><span :title="clock(reap.next_attempt_at)">{{ relative(reap.next_attempt_at) }}</span></td>
 						<td><span :title="clock(reap.updated_at)">{{ relative(reap.updated_at) }}</span></td>
 					</tr>
 				</tbody>
