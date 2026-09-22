@@ -12,6 +12,10 @@ import type {
 	MySpaceLearningPage,
 } from "./types";
 import type {
+	DocumentationLink,
+	DocumentationLinkList,
+	AdminDocumentationLinkInput,
+	AdminDocumentationLinkDeletion,
 	DocumentationPageResponse,
 	DocumentationTreeResponse,
 	PlaygroundCloseResponse,
@@ -254,6 +258,14 @@ export const api = {
 			"GET",
 			path ? `/documentation/tree?path=${encodeURIComponent(path)}` : "/documentation/tree",
 		),
+	// The aggregation list is public read; writes live on the admin trio.
+	listDocumentationLinks: () => request<DocumentationLinkList>("GET", "/documentation/links"),
+	createDocumentationLink: (input: AdminDocumentationLinkInput) =>
+		request<DocumentationLink>("POST", "/admin/documentation/links", input),
+	updateDocumentationLink: (key: string, input: AdminDocumentationLinkInput) =>
+		request<DocumentationLink>("PATCH", `/admin/documentation/links/${encodeURIComponent(key)}`, input),
+	deleteDocumentationLink: (key: string) =>
+		request<AdminDocumentationLinkDeletion>("DELETE", `/admin/documentation/links/${encodeURIComponent(key)}`),
 	// One playground per user, bound to the user alone and carried across the
 	// whole site.
 	getPlayground: () => request<PlaygroundEnvironment>("GET", "/playground"),

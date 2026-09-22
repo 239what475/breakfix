@@ -1,248 +1,252 @@
 <script setup lang="ts">
-import { PanelLeftClose, PanelLeftOpen, RefreshCw } from "lucide-vue-next";
-import { computed, nextTick, onUnmounted, ref, watch } from "vue";
+import { ExternalLink, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Settings } from "lucide-vue-next";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api } from "../../api/client";
-import type { DocumentationPageResponse } from "../../api/generated";
-import { documentationSource, libraryPathOf, urlPathOf } from "./documentation";
-import { renderDocumentMarkdown } from "./markdown";
-import DocumentationToc, { type TreeEntry } from "./DocumentationToc.vue";
+import type { AdminDocumentationLinkInput, DocumentationLink } from "../../api/generated";
+import LinkDialog from "./LinkDialog.vue";
 import "./documentation.css";
 
-const entryUrlPath: string = documentationSource.entryPath;
+defineProps<{ isAdmin?: boolean }>();
+
 const loading = ref(false);
-const failed = ref(false);
-const page = ref<DocumentationPageResponse | null>(null);
-const body = ref("");
-const current = ref({ path: entryUrlPath, hash: "" });
-const roots = ref<TreeEntry[]>([]);
-const expanded = ref<Set<string>>(new Set());
-const tocFailed = ref(false);
-const tocOpen = ref(false);
-const tocCollapsed = ref(false);
-const article = ref<HTMLElement>();
+const loadFailed = ref(false);
+const links = ref<DocumentationLink[]>([]);
+const selectedKey = ref<string>();
+const listCollapsed = ref(false);
+const drawerOpen = ref(false);
+const busy = ref(false);
 
-const currentLibraryPath = computed(() => libraryPathOf(current.value.path));
+const selected = computed(() => links.value.find((link) => link.key === selectedKey.value));
 
-function validPath(path: unknown): path is string {
-  return typeof path === "string" && (path === entryUrlPath.slice(0, -1) || path.startsWith(entryUrlPath));
+// Keep-alive pool: iframes stay mounted under v-show so switching between
+// the most recent documents never reloads them; the pool caps at five and
+// drops the least recently used document when full.
+const KEEP_ALIVE_LIMIT = 5;
+const frames = ref<DocumentationLink[]>([]);
+
+function trackFrame(link: DocumentationLink) {
+	const index = frames.value.findIndex((frame) => frame.key === link.key);
+	if (index >= 0) {
+		if (index !== frames.value.length - 1) {
+			const [frame] = frames.value.splice(index, 1);
+			frames.value.push(frame);
+		}
+		// Always mirror an admin edit so the iframe src follows the change.
+		frames.value[frames.value.length - 1] = link;
+		return;
+	}
+	frames.value.push(link);
+	while (frames.value.length > KEEP_ALIVE_LIMIT) {
+		frames.value.shift();
+	}
 }
 
-function normalizedHash(value: unknown): string | null {
-  if (value === "") return "";
-  if (typeof value !== "string") return null;
-  const hash = value.startsWith("#") ? value : `#${value}`;
-  return /^#[^\s]*$/.test(hash) ? hash : null;
+function untrackFrame(key: string) {
+	frames.value = frames.value.filter((frame) => frame.key !== key);
 }
 
-function readerUrl() {
-  const params = new URLSearchParams({
-    source: documentationSource.source,
-    version: documentationSource.version,
-    path: current.value.path,
-  });
-  if (current.value.hash) params.set("hash", current.value.hash.slice(1));
-  return `/documentation?${params.toString()}`;
+function select(link: DocumentationLink) {
+	selectedKey.value = link.key;
+	trackFrame(link);
+	drawerOpen.value = false;
+	if (window.location.search !== `?doc=${encodeURIComponent(link.key)}`) {
+		window.history.pushState({ documentation: true }, "", `/documentation?doc=${encodeURIComponent(link.key)}`);
+	}
 }
 
-function replaceReaderUrl() {
-  window.history.replaceState({ documentation: true }, "", readerUrl());
+function readLocation(): DocumentationLink | null {
+	const key = new URLSearchParams(window.location.search).get("doc");
+	if (!key) return null;
+	return links.value.find((link) => link.key === key) ?? null;
 }
 
-function readLocation() {
-  const params = new URLSearchParams(window.location.search);
-  const source = params.get("source");
-  const version = params.get("version");
-  const path = params.get("path");
-  const hash = normalizedHash(params.get("hash") || "");
-  if (source === documentationSource.source && version === documentationSource.version && validPath(path) && hash !== null) {
-    current.value = { path, hash };
-  } else {
-    current.value = { path: entryUrlPath, hash: "" };
-    replaceReaderUrl();
-  }
+function syncFromLocation() {
+	const link = readLocation();
+	if (link) {
+		select(link);
+		return;
+	}
+	selectedKey.value = undefined;
+	drawerOpen.value = false;
 }
 
-async function loadPage(scrollHash: string) {
-  const libraryPath = currentLibraryPath.value;
-  if (!libraryPath || libraryPath === "docs") {
-    // A section root is not a page: keep the location and show the outline.
-    page.value = null;
-    body.value = "";
-    return;
-  }
-  loading.value = true;
-  failed.value = false;
-  try {
-    const fetched = await api.getDocumentationPage(libraryPath);
-    page.value = fetched;
-    body.value = await renderDocumentMarkdown(fetched.markdown, fetched.anchors);
-    loading.value = false;
-    await nextTick();
-    revealAnchor(scrollHash);
-  } catch {
-    loading.value = false;
-    failed.value = true;
-  }
+async function loadLinks() {
+	loading.value = true;
+	loadFailed.value = false;
+	try {
+		const response = await api.listDocumentationLinks();
+		links.value = response.links;
+		loading.value = false;
+		// A ?doc=<key> pointing at a removed entry falls back to the empty
+		// state rather than an arbitrary link.
+		if (!selected.value) syncFromLocation();
+	} catch {
+		loading.value = false;
+		loadFailed.value = true;
+	}
 }
 
-function revealAnchor(hash: string) {
-  if (!hash) {
-    article.value?.scrollIntoView({ block: "start" });
-    return;
-  }
-  const target = article.value?.querySelector(`[id="${CSS.escape(hash.replace(/^#/, ""))}"]`);
-  target?.scrollIntoView({ block: "start" });
+// ---------------------------------------------------------------------------
+// Admin mutations. The local list is reconciled from the server responses so
+// the dialog and the iframe pool never drift from the stored records.
+
+const dialogLink = ref<DocumentationLink | null>(null);
+const dialogOpen = ref(false);
+const submitError = ref("");
+// Titles the dialog warns about duplicating: every entry except the one
+// currently being edited.
+const otherTitles = computed(() =>
+	links.value.filter((link) => link.key !== dialogLink.value?.key).map((link) => link.title),
+);
+
+function openCreate() {
+	dialogLink.value = null;
+	submitError.value = "";
+	dialogOpen.value = true;
 }
 
-function navigate(urlPath: string) {
-  current.value = { path: urlPathOf(libraryPathOf(urlPath)), hash: "" };
-  window.history.pushState({ documentation: true }, "", readerUrl());
-  tocOpen.value = false;
-  void loadPage("");
+function openEdit(link: DocumentationLink) {
+	dialogLink.value = link;
+	submitError.value = "";
+	dialogOpen.value = true;
 }
 
-function retry() {
-  void loadPage(current.value.hash);
+async function saveLink(input: AdminDocumentationLinkInput) {
+	if (busy.value) return;
+	busy.value = true;
+	try {
+		if (dialogLink.value) {
+			const updated = await api.updateDocumentationLink(dialogLink.value.key, input);
+			links.value = links.value.map((link) => (link.key === updated.key ? updated : link));
+			trackFrame(updated);
+		} else {
+			const created = await api.createDocumentationLink(input);
+			links.value = [...links.value, created];
+			select(created);
+		}
+		dialogOpen.value = false;
+	} catch {
+		// The dialog stays open with every value intact; the failure shows
+		// in its error slot so nothing the admin typed is lost.
+		submitError.value = "Saving the link failed. Try again.";
+	} finally {
+		busy.value = false;
+	}
 }
 
-async function ensureChildren(entry: TreeEntry) {
-  if (!entry.hasChildren || entry.children) return;
-  try {
-    const response = await api.getDocumentationTree(entry.path);
-    entry.children = response.nodes.map((node) => ({
-      title: node.title,
-      path: node.path,
-      hasChildren: node.has_children,
-    }));
-  } catch {
-    tocFailed.value = true;
-  }
-}
-
-async function toggleEntry(entry: TreeEntry) {
-  await ensureChildren(entry);
-  const next = new Set(expanded.value);
-  if (next.has(entry.path)) next.delete(entry.path);
-  else next.add(entry.path);
-  expanded.value = next;
-}
-
-async function openEntry(entry: TreeEntry) {
-  await ensureChildren(entry);
-  expanded.value = new Set([...expanded.value, entry.path]);
-  navigate(entry.path);
-}
-
-async function loadTreeRoots() {
-  try {
-    const response = await api.getDocumentationTree();
-    roots.value = response.nodes.map((node) => ({
-      title: node.title,
-      path: node.path,
-      hasChildren: node.has_children,
-    }));
-    // Open the top-level section containing the current page so the reader
-    // starts in context instead of a bare outline.
-    for (const root of roots.value) {
-      if (current.value.path.startsWith(`${root.path}/`)) {
-        expanded.value = new Set([...expanded.value, root.path]);
-        await ensureChildren(root);
-      }
-    }
-  } catch {
-    tocFailed.value = true;
-  }
+async function deleteLink() {
+	const target = dialogLink.value;
+	if (!target || busy.value) return;
+	busy.value = true;
+	try {
+		await api.deleteDocumentationLink(target.key);
+		dialogOpen.value = false;
+		untrackFrame(target.key);
+		links.value = links.value.filter((link) => link.key !== target.key);
+		if (selectedKey.value === target.key) {
+			// Back to the empty state; a wrong auto-selection would invite a
+			// second delete click on the wrong row.
+			selectedKey.value = undefined;
+			window.history.pushState({ documentation: true }, "", "/documentation");
+		}
+	} finally {
+		busy.value = false;
+	}
 }
 
 function handlePopState() {
-  readLocation();
-  void loadPage(current.value.hash);
+	if (window.location.pathname === "/documentation") syncFromLocation();
 }
 
-let observer: IntersectionObserver | undefined;
-
-function observeHeadings() {
-  observer?.disconnect();
-  observer = new IntersectionObserver(
-    (entries) => {
-      const visible = entries
-        .filter((entry) => entry.isIntersecting)
-        .sort((left, right) => left.boundingClientRect.top - right.boundingClientRect.top)[0];
-      const id = visible?.target.getAttribute("id");
-      if (!id || current.value.hash === `#${id}`) return;
-      current.value = { ...current.value, hash: `#${id}` };
-      replaceReaderUrl();
-    },
-    { rootMargin: "-72px 0px -55% 0px", threshold: 0 },
-  );
-  article.value?.querySelectorAll("h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]").forEach((heading) => {
-    observer?.observe(heading);
-  });
-}
-
-watch(body, async () => {
-  await nextTick();
-  observeHeadings();
+onMounted(() => {
+	window.addEventListener("popstate", handlePopState);
+	void loadLinks();
 });
 
-readLocation();
-void loadTreeRoots();
-void loadPage(current.value.hash);
-window.addEventListener("popstate", handlePopState);
 onUnmounted(() => {
-  window.removeEventListener("popstate", handlePopState);
-  observer?.disconnect();
+	window.removeEventListener("popstate", handlePopState);
 });
 </script>
 
 <template>
-  <section class="documentation-page" aria-label="Kubernetes documentation">
-    <div class="documentation-reader" :class="{ 'toc-collapsed': tocCollapsed }">
-      <button
-        class="compact-button documentation-toc-toggle"
-        type="button"
-        :aria-label="tocCollapsed ? 'Expand documentation outline' : 'Collapse documentation outline'"
-        @click="tocCollapsed = !tocCollapsed"
-      >
-        <component :is="tocCollapsed ? PanelLeftOpen : PanelLeftClose" :size="14" aria-hidden="true" />
-      </button>
-      <button class="compact-button documentation-toc-mobile" type="button" @click="tocOpen = true">
-        <PanelLeftOpen :size="14" aria-hidden="true" /> Contents
-      </button>
-
-      <nav class="documentation-toc" :class="{ open: tocOpen }" aria-label="Documentation outline">
-        <div class="documentation-toc-head">
+  <section class="documentation-page" aria-label="Documentation">
+    <div class="documentation-shell" :class="{ 'list-collapsed': listCollapsed }">
+      <nav class="documentation-list" :class="{ open: drawerOpen }" aria-label="Documentation links">
+        <div class="documentation-list-head">
           <span>Documentation</span>
-          <button class="compact-button" type="button" aria-label="Close documentation outline" @click="tocOpen = false">×</button>
+          <button class="compact-button" type="button" aria-label="Close documentation list" @click="drawerOpen = false">×</button>
         </div>
-        <p v-if="tocFailed" class="documentation-toc-error">The outline is unavailable.</p>
-        <DocumentationToc
-          :entries="roots"
-          :expanded="expanded"
-          :current-path="currentLibraryPath"
-          @toggle="toggleEntry"
-          @open="openEntry"
-        />
+        <ul class="documentation-list-items">
+          <li v-for="link in links" :key="link.key" class="documentation-list-item" :class="{ active: link.key === selectedKey }">
+            <button class="documentation-list-link" type="button" :title="link.url" @click="select(link)">
+              <span class="documentation-list-title">{{ link.title }}</span>
+            </button>
+            <button v-if="isAdmin" class="compact-button documentation-item-settings" type="button" :aria-label="`Settings for ${link.title}`" @click="openEdit(link)">
+              <Settings :size="13" aria-hidden="true" />
+            </button>
+          </li>
+          <li v-if="isAdmin" class="documentation-list-item documentation-list-add">
+            <button class="documentation-list-link" type="button" @click="openCreate">
+              <Plus :size="14" aria-hidden="true" /> <span>Add documentation link</span>
+            </button>
+          </li>
+        </ul>
       </nav>
-      <div v-if="tocOpen" class="documentation-toc-backdrop" @click="tocOpen = false"></div>
+      <div v-if="drawerOpen" class="documentation-list-backdrop" @click="drawerOpen = false"></div>
 
       <div class="documentation-body">
-        <div v-if="loading" class="documentation-state">Loading documentation...</div>
-        <div v-else-if="failed" class="documentation-state documentation-state-error">
-          <strong>Documentation is unavailable.</strong>
-          <button class="compact-button" type="button" @click="retry">
+        <div class="documentation-toolbar">
+          <button
+            class="compact-button documentation-list-toggle"
+            type="button"
+            :aria-label="listCollapsed ? 'Expand documentation list' : 'Collapse documentation list'"
+            @click="listCollapsed = !listCollapsed"
+          >
+            <component :is="listCollapsed ? PanelLeftOpen : PanelLeftClose" :size="14" aria-hidden="true" />
+          </button>
+          <button class="compact-button documentation-list-mobile" type="button" @click="drawerOpen = true">
+            <PanelLeftOpen :size="14" aria-hidden="true" /> Contents
+          </button>
+          <span class="documentation-toolbar-title" :title="selected?.url">{{ selected ? selected.title : "Documentation" }}</span>
+          <a v-if="selected" class="documentation-open-external" :href="selected.url" target="_blank" rel="noopener noreferrer">
+            <ExternalLink :size="13" aria-hidden="true" /> Open in new window
+          </a>
+        </div>
+
+        <div v-if="selected && selected.embed" class="documentation-frames">
+          <iframe
+            v-for="frame in frames"
+            v-show="frame.key === selectedKey"
+            :key="frame.key"
+            class="documentation-frame"
+            :src="frame.url"
+            :title="frame.title"
+            referrerpolicy="no-referrer"
+          ></iframe>
+        </div>
+        <div v-else-if="selected" class="documentation-external">
+          <p>This site cannot be verified to allow embedding.</p>
+          <a class="documentation-external-card" :href="selected.url" target="_blank" rel="noopener noreferrer">
+            <ExternalLink :size="15" aria-hidden="true" />
+            <span class="documentation-external-title">{{ selected.title }}</span>
+            <span class="documentation-external-url">{{ selected.url }}</span>
+          </a>
+        </div>
+        <div v-else-if="loadFailed" class="documentation-empty documentation-empty-error">
+          <strong>The documentation list is unavailable.</strong>
+          <button class="compact-button" type="button" @click="loadLinks">
             <RefreshCw :size="14" aria-hidden="true" /> Retry
           </button>
         </div>
-        <!-- Rendered from library markdown with html:false; all markup comes
-             from markdown-it's own rules plus classed wrappers. -->
-        <!-- eslint-disable-next-line vue/no-v-html -->
-        <article v-else-if="page" ref="article" class="documentation-article" v-html="body"></article>
         <div v-else class="documentation-empty">
           <h2>Documentation</h2>
-          <p>Choose a page from the outline to start reading.</p>
+          <p v-if="loading">Loading documentation...</p>
+          <p v-else-if="!links.length">No documentation has been added yet.</p>
+          <p v-else>Choose a document from the list to start reading.</p>
         </div>
       </div>
     </div>
+
+    <LinkDialog v-if="dialogOpen" :link="dialogLink" :other-titles="otherTitles" :submit-error="submitError" @close="dialogOpen = false" @save="saveLink" @del="deleteLink" />
   </section>
 </template>

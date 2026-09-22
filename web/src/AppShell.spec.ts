@@ -91,3 +91,38 @@ describe("AppShell admin gate", () => {
 		expect(console.props("section")).toBe("environments");
 	});
 });
+
+describe("AppShell documentation binding", () => {
+	afterEach(() => {
+		localStorage.removeItem("token");
+		window.history.pushState({}, "", "/");
+		vi.clearAllMocks();
+	});
+
+	// The entry is a plain /documentation link now; the admin verdict flows
+	// into the page as a prop instead of a composed reader URL.
+	it("mounts the aggregation page on /documentation and forwards the admin role", async () => {
+		vi.mocked(api.getPlayground).mockResolvedValue({ state: "none" });
+		localStorage.setItem("token", tokenWithRole("admin"));
+		window.history.pushState({}, "", "/documentation");
+		const wrapper = mountShell();
+		await flushPromises();
+
+		const documentation = wrapper.findComponent({ name: "DocumentationPage" });
+		expect(documentation.exists()).toBe(true);
+		// The boolean prop falls through the stub to its root element.
+		expect(documentation.attributes("is-admin")).toBe("true");
+	});
+
+	it("forwards a member role as a non-admin page", async () => {
+		vi.mocked(api.getPlayground).mockResolvedValue({ state: "none" });
+		localStorage.setItem("token", tokenWithRole("user"));
+		window.history.pushState({}, "", "/documentation");
+		const wrapper = mountShell();
+		await flushPromises();
+
+		const documentation = wrapper.findComponent({ name: "DocumentationPage" });
+		expect(documentation.exists()).toBe(true);
+		expect(documentation.attributes("is-admin")).toBe("false");
+	});
+});

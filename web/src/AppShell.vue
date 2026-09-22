@@ -5,15 +5,14 @@ import AuthDialog from "./features/auth/AuthDialog.vue";
 import AuthoringWorkspace from "./features/authoring/AuthoringWorkspace.vue";
 import ScenarioCatalogPage from "./features/catalog/ScenarioCatalogPage.vue";
 import MySpacePage from "./features/my-space/MySpacePage.vue";
-import { documentationSource } from "./features/documentation/documentation";
 import AdminPage from "./features/admin/AdminPage.vue";
 import { isLoggedIn, tokenUserRole } from "./api/client";
 import ScenarioWorkspace from "./features/workspace/ScenarioWorkspace.vue";
 import { useScenarioSession } from "./features/workspace/useScenarioSession";
 import PlaygroundDock from "./features/playground/PlaygroundDock.vue";
 
-// The documentation reader (markdown-it + Shiki) loads as its own chunk so
-// the primary bundle stays lean.
+// The documentation aggregation page loads as its own chunk so the primary
+// bundle stays lean.
 const DocumentationPage = defineAsyncComponent(() => import("./features/documentation/DocumentationPage.vue"));
 
 const authOpen = ref(false);
@@ -116,10 +115,7 @@ function openAdmin(section: AdminSection = "users") {
 function openDocumentation() {
 	closeAuthoring();
 	closeWorkspace();
-	if (page.value !== "documentation") {
-		const params = new URLSearchParams({ source: documentationSource.source, version: documentationSource.version, path: documentationSource.entryPath });
-		window.history.pushState({}, "", `/documentation?${params.toString()}`);
-	}
+	if (page.value !== "documentation") window.history.pushState({}, "", "/documentation");
 	page.value = "documentation";
 }
 
@@ -194,6 +190,7 @@ onUnmounted(() => window.removeEventListener("popstate", handlePopState));
 		<main class="app-main">
       <DocumentationPage
         v-if="!workspace && !authoringOpen && page === 'documentation'"
+        :is-admin="isAdmin"
       />
       <ScenarioCatalogPage
 		v-show="!workspace && !authoringOpen && page === 'operations'"

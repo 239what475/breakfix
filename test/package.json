@@ -11,7 +11,6 @@
     "test:e2e:k8s": "playwright test -c playwright.k8s.config.ts",
     "test:e2e:recovery": "playwright test -c playwright.recovery.config.ts",
     "test:e2e:documentation": "playwright test -c playwright.documentation.config.ts",
-    "test:e2e:documentation:reader": "playwright test -c playwright.documentation.config.ts --project=reader-smoke",
     "test:e2e:documentation:playground": "playwright test -c playwright.documentation.config.ts --project=playground-e2e",
     "test:acceptance:node": "playwright test -c playwright.agent-live.config.ts authoring.node.live.spec.ts",
     "test:acceptance:mcp": "playwright test -c playwright.agent-live.config.ts authoring.mcp.live.spec.ts",
