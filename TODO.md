@@ -1,97 +1,53 @@
 # TODO
 
-已完成的阶段见 git 历史(最近:队列两阶段——死信 reap 退场与动作队列诚实失败,均于
-2026-09-22 单提交交付;交付记录与验收证据见各自提交的 TODO 收口章)。本文件保留未立项
-事项与挂起决策。
+已完成的阶段见 git 历史(最近:队列两阶段——死信 reap 退场 b96515e 与动作队列诚实失败
+040cf72,均于 2026-09-22 单提交交付;交付记录与验收证据见各自提交的 TODO 收口章)。当前
+阶段:admin 动作队列观测面。本文件保留当前阶段计划、未立项事项与挂起决策。
 
-## 阶段:死信 reap 退场——封顶退避,永不放弃目标(2026-09-22 交付)
+## 阶段:admin 动作队列观测面——补齐两条队列的观测对称
 
-### 交付记录
+### 定案
 
-- **域与 Reaper**:`internal/domain/runnable/reap.go` 删 `ReapDead` 与 `ReapQueue.Deadletter`
-  (含 InMemory 实现),队列接口注释改写为"无终态放弃:目标持有者(CR)永不放弃,失败
-  尝试一律回 queued 等运维修复底层资源";`internal/controller/runtimeenvironment/reaper.go`
-  删 `reaperMaxAttempts`/`reaperDeadDiagnostic` 与 RunOnce 的 deadletter 分支——失败一律
-  `Complete(false)` + `reaperRetryDelay`(5s 起倍增,第 7 次起恒 5 分钟,attempt 无上限)。
-  Controller 侧零改动(本就 reconcile-forever,`ReapSucceeded` 仍是唯一收口判据)。
-- **Postgres 与 schema**:`runnable_repository.go` 删 `Deadletter` 实现,`scanRunnableReap`
-  行状态允许集合去 dead;`schema_runnable.go` 的 runnable_reaps CHECK 去 `'dead'`;
-  baseline 57→58(破坏式,重置重建)。
-- **API 与前端**:`openapi.yaml` 的 `AdminRunnableReap.state` 枚举去 dead → `make
-  generate`(server.gen.go 与 web types 同步);AdminEnvironmentsPage 回收队列注解改写
-  (封顶 5 分钟永不放弃、资源不存在计成功、长期未成功行需集群侧修复),删 dead 态
-  "下次尝试 —"分支;`admin.css` 删 `[data-state="dead"]` 徽标样式。
-- **测试**:`reconciler_test.go` 的退避用例重写为 `TestReaperRetriesForeverAtCappedBackoff`
-  ——序列 5s/10s/20s/40s/80s/160s 后恒 300s,第 10 次尝试仍在 queued、带诊断、可认领;
-  `runnable_repository_test.go` 死信用例重写为"8 次失败后仍 queued、围栏有效、远超历史
-  上限仍可认领、观察面可见";`AdminEnvironmentsPage.spec.ts` dead 徽标断言改为长期卡住
-  行的高亮断言(attempt 12 的 queued 行带 `admin-row-stuck` 且仍承诺下次尝试)。
+- **服务端契约现成**:`GET /admin/runnable-actions`(openapi `listAdminRunnableActions`)
+  返回整队列汇总(byState/byAttempt)与条目列表——含 failure 三列与 `attempt-high` 旗标
+  (runnable_admin.go);条目级 state/phase 过滤可选,汇总始终覆盖全队列。
+- **前端零消费**:web 无 fetch、无页面区块(client.ts 只有 `listAdminRunnableReaps`)——
+  reap 队列有观测表,动作队列没有,观测不对称。
+- **时机**:动作阶段(040cf72)刚让队列状态变得有语义——`attempts-exhausted` 的 failed
+  行、退避中的 infra 重试行、缓存 fail-fast 的 artifact 失败行——但管理员只能隔着
+  工作流/安装失败间接感知,排障时看不到队列本体。
+- **后端零改动**:契约、handler、仓储观测查询全部现成;`attempt-high` 旗标阈值
+  (attempt≥4,runnable_admin.go:102)在新上限(8)语义下恰为"预算过半",不过时。卡住
+  高亮直接消费服务端旗标,不做前端派生——比 reap 侧的前端派生更权威的数据来源。
+- 边界:条目的 state/phase 过滤查询参数本阶段不接 UI(区块先做全量列表+汇总;过滤等有
+  真实排障需求再说)。
 
-### 验收证据
+### 任务
 
-- 快车道全套:`make test-unit`、`make test-race`、`make verify-generated`、`make lint`
-  (0 issues)、`kubectl kustomize .`、`make web-test-unit`(8 files / 51 tests)全绿。
-- PostgreSQL 门控套件(schema 58 破坏迁移重建)通过。
-- 行为断言:任何失败路径都不再产生终态放弃;退避序列 5s,10s,20s,40s,80s,160s 后恒
-  300s;attempt 无上限仍回到 queued。
-- 未排 e2e:无新集群侧行为契约,快车道+PG 门控足够(与计划一致)。
+- **client**:`web/src/api/client.ts` 增手写方法 `listAdminRunnableActions()`(镜像
+  `listAdminRunnableReaps` 的 request 封装);生成物类型
+  (AdminRunnableActionPage/Item/Summary)已存在,零 generate。
+- **admin.ts**:拉取并入既有 `Promise.all`,新增动作列表与汇总 ref,随 refresh 一起刷新。
+- **AdminEnvironmentsPage.vue**:回收队列区块之后增"动作队列"区块——汇总行(按状态
+  计数)+ 表格(动作 key(shortId)、phase、状态徽标、尝试、失败 code(title 挂
+  class+summary)、下次运行(终态行示 —))+ 行高亮消费 `flag === 'attempt-high'`;
+  区块注解写明产品语义(failed 为显式失败;重装对 infra 失败自动开新周期,artifact
+  失败缓存 fail-fast)。
+- **admin.css**:视需要补动作状态徽标配色(running/completed;failed 复用既有样式)。
+- **测试**:AdminEnvironmentsPage.spec 增动作区块断言——汇总渲染、failed 徽标、
+  attempt-high 行高亮、失败列 title、空态。
 
-## 阶段:动作队列诚实失败——退避、显式耗尽、失败传导(2026-09-22 交付)
+### 提交切分
 
-### 交付记录
+单提交交付(`feat(admin): surface the runnable action queue in the console`):纯前端 +
+测试 + TODO 收口章。后端、openapi、schema、生成物零改动。
 
-- **共享退避曲线(domain/runnable/backoff.go)**:`RetryBackoff(base, attempt)`——5s 起倍增、
-  `RetryBackoffCap`=5 分钟封顶;reaper 删本地 `reaperRetryDelay` 改用共享曲线,动作队列
-  同曲线,平台一条耐心曲线两个消费者。
-- **重试与耗尽(postgres/runnable_repository.go)**:`ReportRunnableActionFailure` 改事务
-  实现——FOR UPDATE 锁行读 attempt,infra 分支按 `RetryBackoff(5s, attempt)` 回队并保留
-  诊断;attempt 达 `runnableActionMaxAttempts=8` 时不再回队,写显式
-  `state='failed'/failure_class='infrastructure'/failure_code='attempts-exhausted'`
-  (调用方 summary 作为最后错误保留);artifact 失败照旧一次转 failed。退避间隔合计
-  615s(5+10+20+40+80+160+300),最坏耐心为 8 次执行期限 + 615s。`ClaimRunnableAction`
-  删 `AND attempt < ?` 截断——耗尽只由失败汇报显式转移,扫描不再静默跳过。
-- **重调度语义**:两处 INSERT 的 `ON CONFLICT` 改条件 `DO UPDATE`(共享 SQL 片段
-  `runnableActionReschedule`):仅现有行 `state='failed' AND failure_class='infrastructure'`
-  时重置 queued、attempt=0、清空 failure 三列、next_run_at 取新调度时刻;artifact 失败
-  原样缓存,重装 fail-fast 是特性。
-- **到期归因(worker/runnable/runner.go)**:`reportFailure` 将
-  `context.DeadlineExceeded`(含包装)归为 artifact、code=`execution-deadline-exceeded`,
-  一次完成失败——infra 重试不再把最坏耐心放大成尝试数 × 执行期限。
-- **失败传导**:`ResolveVerificationForAction`/`ResolveMaterializedRunnableRevision` 先查
-  动作行(failure 三列与身份全列匹配,行不一致视为完整性错误),failed 时返回新
-  `runnable.ActionFailure`(携带 class/code/summary,`Unwrap` 到哨兵
-  `ErrRunnableActionFailed`)而非 `ErrMaterializationNotReady`;coordinator 对该错误调
-  新增 `GenerationRepository.FailRunnableGenerationWorkflow`(Materializing/Verifying →
-  既有 `StateFailed` 终态,state_version+1,last_error 带类/码/摘要);installer 的
-  `advanceEntries` 两处走既有 `FailRelease`;`report.Passed=false → FailRelease` 既有
-  路径不动。
-- **schema 58→59(一处对计划的如实偏离)**:计划断言"零 schema 迁移"的前提是"实现时
-  核实无其他约束"。核实发现 `runnable_actions.attempt` 有未列入的
-  `CHECK (attempt <= 5)`——"claim 无截断、attempt 超限仍可认领、耗尽只由失败汇报显式
-  转移"要求租约接管链可把 attempt 推过任何有限上限,CHECK 必须放宽为
-  `CHECK (attempt >= 0)`。动作四态、failure_class CHECK、openapi 与前端生成物零改动
-  (AdminRunnableActionItem 的 state/failure 为自由字符串,已核实)。
-- **测试**:domain 曲线序列与退化输入;仓库层——infra 退避序列(7 次回队 next_run_at
-  逐一对上曲线)+ 第 8 次显式 failed(class/code/summary 断言)+ failed 行不可认领 +
-  resolver 返回 ActionFailure;claim 无截断(手插 attempt=9 的 queued 行仍可认领至 10,
-  其失败汇报即显式耗尽);重调度二分(infra-failed 重置为 attempt=0 的新周期、
-  artifact-failed 原样缓存);runner——deadline 包装错误归 artifact/
-  execution-deadline-exceeded、"报告携带 artifact 失败即 completed"回归护栏(不再
-  ReportFailure、不再请求环境释放);coordinator——物化/验证两侧 failed 动作下一轮
-  即 StateFailed 且无投影写入;installer——新增 `installer_test.go`(复用
-  writePortableRelease fixture),物化/验证两侧 failed 动作走 FailRelease 且不再标记
-  Materialized/Verified。
+### 验收门槛
 
-### 验收证据
-
-- 快车道全套:`make test-unit`、`make test-race`、`make verify-generated`、`make lint`
-  (0 issues)、`kubectl kustomize .`、`make web-test-unit`(8 files / 51 tests,
-  web 侧本阶段零改动)全绿。
-- PostgreSQL 门控套件(schema 59 破坏迁移重建)通过。
-- 行为断言:任何路径都不再产生"停在 queued 却永不被认领"的行(claim 无截断 + 耗尽由
-  失败汇报显式转移);显式 failed 的动作让等待方在下一个观察周期走到失败出口
-  (coordinator→StateFailed、installer→FailRelease),而非无限等待。
-- 未排 e2e:无新集群侧行为契约(与计划一致)。
+- 快车道全套:`make test-unit`、`make test-race`、`make verify-generated`、`make lint`、
+  `kubectl kustomize .`、`make web-test-unit` 全绿。
+- Go 侧零改动,不排 PG 门控(编译与既有套件已覆盖);行为断言由组件测试承担
+  (徽标/高亮/汇总/title/空态)。
 
 ## 未立项事项
 
