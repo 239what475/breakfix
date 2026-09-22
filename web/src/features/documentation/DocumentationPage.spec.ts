@@ -160,6 +160,27 @@ describe("DocumentationPage selection", () => {
 		expect(sources).toContain("https://doc-a.example/docs");
 	});
 
+	it("keeps the iframe pool mounted while a URL-card entry is showing", async () => {
+		wrapper = mountPage();
+		await flushPromises();
+		await selectByTitle(wrapper, "Doc doc-alpha");
+		const frameBefore = renderedFrames(wrapper)[0].element;
+
+		// The pool container hides for the URL card but never unmounts, and a
+		// non-embeddable entry never claims a pool slot.
+		await selectByTitle(wrapper, "Doc doc-gamma");
+		expect(wrapper.get(".documentation-external-card").attributes("href")).toBe("https://doc-gamma.example/docs");
+		expect(wrapper.get(".documentation-frames").element.style.display).toBe("none");
+		expect(renderedFrames(wrapper)).toHaveLength(1);
+
+		// Back on the embeddable entry: the same iframe node, never reloaded.
+		await selectByTitle(wrapper, "Doc doc-alpha");
+		const frames = renderedFrames(wrapper);
+		expect(frames).toHaveLength(1);
+		expect(frames[0].element).toBe(frameBefore);
+		expect(wrapper.get(".documentation-frames").element.style.display).not.toBe("none");
+	});
+
 	it("restores the selection from ?doc=<key> on load and on popstate", async () => {
 		window.history.replaceState({}, "", "/documentation?doc=doc-beta");
 		wrapper = mountPage();
@@ -348,6 +369,23 @@ describe("DocumentationPage admin surface", () => {
 		expect(wrapper.find(".dialog").exists()).toBe(true);
 		expect(dialog.text()).toContain("Saving the link failed. Try again.");
 		expect((dialog.get('input[name="title"]').element as HTMLInputElement).value).toBe("Fresh docs");
+	});
+
+	it("surfaces a failed delete inside the dialog and keeps the entry", async () => {
+		vi.mocked(api.deleteDocumentationLink).mockRejectedValueOnce(new Error("boom"));
+		wrapper = mountAdmin();
+		await flushPromises();
+		await selectByTitle(wrapper, "Doc doc-alpha");
+
+		await wrapper.get('.documentation-list-item.active .documentation-item-settings').trigger("click");
+		await wrapper.get(".dialog .danger-text-button").trigger("click");
+		await flushPromises();
+
+		expect(wrapper.find(".dialog").exists()).toBe(true);
+		expect(wrapper.get(".dialog").text()).toContain("Deleting the link failed. Try again.");
+		// Three links plus the admin add row all survive the failed delete.
+		expect(wrapper.findAll(".documentation-list-item")).toHaveLength(4);
+		expect(window.location.search).toBe("?doc=doc-alpha");
 	});
 });
 

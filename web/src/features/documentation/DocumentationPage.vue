@@ -20,7 +20,8 @@ const selected = computed(() => links.value.find((link) => link.key === selected
 
 // Keep-alive pool: iframes stay mounted under v-show so switching between
 // the most recent documents never reloads them; the pool caps at five and
-// drops the least recently used document when full.
+// drops the least recently used document when full. Only embeddable entries
+// enter it — a URL-card entry would burn a slot on a frame that never shows.
 const KEEP_ALIVE_LIMIT = 5;
 const frames = ref<DocumentationLink[]>([]);
 
@@ -47,7 +48,7 @@ function untrackFrame(key: string) {
 
 function select(link: DocumentationLink) {
 	selectedKey.value = link.key;
-	trackFrame(link);
+	if (link.embed) trackFrame(link);
 	drawerOpen.value = false;
 	if (window.location.search !== `?doc=${encodeURIComponent(link.key)}`) {
 		window.history.pushState({ documentation: true }, "", `/documentation?doc=${encodeURIComponent(link.key)}`);
@@ -118,7 +119,8 @@ async function saveLink(input: AdminDocumentationLinkInput) {
 		if (dialogLink.value) {
 			const updated = await api.updateDocumentationLink(dialogLink.value.key, input);
 			links.value = links.value.map((link) => (link.key === updated.key ? updated : link));
-			trackFrame(updated);
+			if (updated.embed) trackFrame(updated);
+			else untrackFrame(updated.key);
 		} else {
 			const created = await api.createDocumentationLink(input);
 			links.value = [...links.value, created];
@@ -149,6 +151,10 @@ async function deleteLink() {
 			selectedKey.value = undefined;
 			window.history.pushState({ documentation: true }, "", "/documentation");
 		}
+	} catch {
+		// Mirror the save path: the dialog stays open and the failure lands in
+		// its error slot, so a failed delete is never silent.
+		submitError.value = "Deleting the link failed. Try again.";
 	} finally {
 		busy.value = false;
 	}
@@ -213,7 +219,9 @@ onUnmounted(() => {
           </a>
         </div>
 
-        <div v-if="selected && selected.embed" class="documentation-frames">
+        <!-- v-show, not v-if: the pool must stay mounted while an embed=false
+             entry shows its URL card, or every kept-alive frame reloads. -->
+        <div v-show="selected && selected.embed" class="documentation-frames">
           <iframe
             v-for="frame in frames"
             v-show="frame.key === selectedKey"
@@ -224,7 +232,7 @@ onUnmounted(() => {
             referrerpolicy="no-referrer"
           ></iframe>
         </div>
-        <div v-else-if="selected" class="documentation-external">
+        <div v-if="selected && !selected.embed" class="documentation-external">
           <p>This site cannot be verified to allow embedding.</p>
           <a class="documentation-external-card" :href="selected.url" target="_blank" rel="noopener noreferrer">
             <ExternalLink :size="15" aria-hidden="true" />
@@ -232,13 +240,13 @@ onUnmounted(() => {
             <span class="documentation-external-url">{{ selected.url }}</span>
           </a>
         </div>
-        <div v-else-if="loadFailed" class="documentation-empty documentation-empty-error">
+        <div v-else-if="!selected && loadFailed" class="documentation-empty documentation-empty-error">
           <strong>The documentation list is unavailable.</strong>
           <button class="compact-button" type="button" @click="loadLinks">
             <RefreshCw :size="14" aria-hidden="true" /> Retry
           </button>
         </div>
-        <div v-else class="documentation-empty">
+        <div v-else-if="!selected" class="documentation-empty">
           <h2>Documentation</h2>
           <p v-if="loading">Loading documentation...</p>
           <p v-else-if="!links.length">No documentation has been added yet.</p>
