@@ -61,6 +61,10 @@ export type PlaygroundEnvironment = {
      * Runtime kind, for example k8s
      */
     runtime?: string;
+    /**
+     * Reset generation once a session exists; it increments with every adopted reset, so a ready observed after the generation moved belongs to the wiped environment
+     */
+    generation?: number;
 };
 
 export type PlaygroundCloseResponse = {

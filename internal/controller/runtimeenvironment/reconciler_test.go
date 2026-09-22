@@ -3,6 +3,7 @@ package runtimeenvironment
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -106,7 +107,10 @@ func TestReconcilerFinalizesAndProjectsReadyRuntime(t *testing.T) {
 	}
 }
 
-func TestReconcilerFencesResetNonceAndResumesProvisioning(t *testing.T) {
+// A reset whose wipe has not finished keeps the environment Resetting: the
+// adoptive Provision path stays unreachable, so a deleting namespace can never
+// be adopted as the reset's result and clear the operation on stale terminals.
+func TestReconcilerSustainsResetWhileWipeIsIncomplete(t *testing.T) {
 	now := fixedRuntimeEnvironmentTime()
 	revision := validRevision(t)
 	environment := testRuntimeEnvironment(t, revision, runtimev2.PhaseReady, now)
@@ -115,21 +119,64 @@ func TestReconcilerFencesResetNonceAndResumesProvisioning(t *testing.T) {
 	provider := &reconcilerProvider{reset: Observation{Ready: false}, provision: Observation{Ready: true}}
 	reconciler, kubeClient := newRuntimeEnvironmentReconciler(t, environment, revision, provider, NewInMemoryReapQueue(), now)
 
+	reconcileRuntimeEnvironmentTimes(t, reconciler, environment.Name, 3)
+	current := getRuntimeEnvironment(t, kubeClient, environment.Name)
+	if provider.resetCalls != 3 || provider.provisionCalls != 0 {
+		t.Fatalf("reset calls=%d provision calls=%d, want the reset sustained and provision unreachable", provider.resetCalls, provider.provisionCalls)
+	}
+	if current.Status.Phase != runtimev2.PhaseReady || current.Status.Operation != runtimev2.OperationResetting {
+		t.Fatalf("status during wipe = %#v, want Ready+Resetting", current.Status)
+	}
+	if current.Annotations[resetNonceAnnotation] != "1" || current.Status.ObservedResetNonce != 1 {
+		t.Fatalf("reset adoption annotations=%#v status nonce=%d", current.Annotations, current.Status.ObservedResetNonce)
+	}
+}
+
+// The rebuilt terminal's Ready observation is the only reset completion: the
+// operation clears once and the adopted generation is echoed for consumers.
+func TestReconcilerCompletesResetOnlyOnRebuiltReady(t *testing.T) {
+	now := fixedRuntimeEnvironmentTime()
+	revision := validRevision(t)
+	environment := testRuntimeEnvironment(t, revision, runtimev2.PhaseReady, now)
+	environment.Spec.ResetNonce = 1
+	environment.Finalizers = []string{finalizer}
+	provider := &reconcilerProvider{reset: Observation{Ready: true}}
+	reconciler, kubeClient := newRuntimeEnvironmentReconciler(t, environment, revision, provider, NewInMemoryReapQueue(), now)
+
 	reconcileRuntimeEnvironmentTimes(t, reconciler, environment.Name, 2)
 	current := getRuntimeEnvironment(t, kubeClient, environment.Name)
-	if provider.resetCalls != 1 || current.Annotations[resetNonceAnnotation] != "1" {
-		t.Fatalf("reset was not fenced: calls=%d annotations=%#v", provider.resetCalls, current.Annotations)
+	if provider.resetCalls != 1 || provider.provisionCalls != 0 {
+		t.Fatalf("reset calls=%d provision calls=%d", provider.resetCalls, provider.provisionCalls)
 	}
 	if current.Status.Phase != runtimev2.PhaseReady || current.Status.Operation != runtimev2.OperationNone {
-		t.Fatalf("status after reset = %#v", current.Status)
+		t.Fatalf("status after reset = %#v, want Ready with the operation cleared", current.Status)
 	}
-	if provider.provisionCalls != 1 {
-		t.Fatalf("post-reset provisioning calls = %d, want 1", provider.provisionCalls)
+	if current.Status.ObservedResetNonce != 1 {
+		t.Fatalf("observed reset nonce = %d, want the adopted generation echoed", current.Status.ObservedResetNonce)
 	}
+}
+
+// A reset that cannot finish within its lifecycle budget fails honestly: the
+// environment reads Failed — rebuildable — instead of pretending Ready.
+func TestReconcilerFailsResetPastItsDeadline(t *testing.T) {
+	now := fixedRuntimeEnvironmentTime()
+	revision := validRevision(t)
+	environment := testRuntimeEnvironment(t, revision, runtimev2.PhaseReady, now)
+	environment.Spec.ResetNonce = 1
+	environment.Status.Operation = runtimev2.OperationResetting
+	environment.Status.ObservedResetNonce = 1
+	environment.Annotations = map[string]string{resetNonceAnnotation: "1", resetAdoptedAnnotation: fmt.Sprintf("%d", now.Add(-61*time.Second).Unix())}
+	environment.Finalizers = []string{finalizer}
+	provider := &reconcilerProvider{reset: Observation{Ready: false}}
+	reconciler, kubeClient := newRuntimeEnvironmentReconciler(t, environment, revision, provider, NewInMemoryReapQueue(), now)
 
 	reconcileRuntimeEnvironmentTimes(t, reconciler, environment.Name, 1)
-	if provider.resetCalls != 1 {
-		t.Fatalf("reset repeated after nonce was observed: calls=%d", provider.resetCalls)
+	current := getRuntimeEnvironment(t, kubeClient, environment.Name)
+	if current.Status.Phase != runtimev2.PhaseFailed || current.Status.Operation != runtimev2.OperationNone || current.Status.Failure == nil || current.Status.Failure.Reason != "reset-timeout" {
+		t.Fatalf("status past the reset deadline = %#v", current.Status)
+	}
+	if provider.resetCalls != 0 {
+		t.Fatalf("reset attempted past the deadline: calls=%d", provider.resetCalls)
 	}
 }
 

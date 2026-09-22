@@ -146,6 +146,10 @@ func Decide(environment runtimev2.RuntimeEnvironment, plan Plan, now time.Time, 
 		}
 		return DecisionDrain, nil
 	}
+	// A reset request not yet observed, or a reset still in flight, both keep
+	// choosing DecisionReset. The adoptive Provision path never participates in
+	// a reset lifecycle: it would adopt a deleting namespace and clear the
+	// operation on the stale terminal's first ready-looking observation.
 	if environment.Status.Phase == runtimev2.PhaseReady && environment.Spec.ResetNonce > observedResetNonce {
 		return DecisionReset, nil
 	}
@@ -153,7 +157,7 @@ func Decide(environment runtimev2.RuntimeEnvironment, plan Plan, now time.Time, 
 		if environment.Status.Phase != runtimev2.PhaseReady && environment.Status.Phase != runtimev2.PhaseProvisioning {
 			return DecisionNone, fmt.Errorf("runtime environment reset is invalid in phase %q", environment.Status.Phase)
 		}
-		return DecisionProvision, nil
+		return DecisionReset, nil
 	}
 	switch environment.Status.Phase {
 	case "", runtimev2.PhasePending, runtimev2.PhaseProvisioning:

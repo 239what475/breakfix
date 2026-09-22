@@ -89,6 +89,11 @@ func playgroundResponse(env *activeEnvironment) api.PlaygroundEnvironment {
 		environmentID, runtime := env.UID, env.Runtime
 		response.EnvironmentId = &environmentID
 		response.Runtime = &runtime
+		// The reset generation: consumers compare it across a reset so only a
+		// ready observed after the generation moved belongs to the wiped
+		// environment.
+		generation := env.ObservedResetNonce
+		response.Generation = &generation
 	}
 	return response
 }

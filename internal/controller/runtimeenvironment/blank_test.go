@@ -92,7 +92,10 @@ func TestReconcilerProvisionsBlankEnvironmentFromInstalledPlan(t *testing.T) {
 	}
 }
 
-func TestReconcilerFencesBlankResetByNonce(t *testing.T) {
+// The blank playground reset rides the same one-path semantics: an incomplete
+// wipe sustains Resetting with Provision unreachable, and the rebuilt
+// terminal's Ready observation alone clears the operation.
+func TestReconcilerRunsBlankResetToOneCompletion(t *testing.T) {
 	now := fixedRuntimeEnvironmentTime()
 	plan := blankTestPlan(t)
 	environment := blankTestEnvironment(plan, runtimev2.PhaseReady, now)
@@ -109,11 +112,24 @@ func TestReconcilerFencesBlankResetByNonce(t *testing.T) {
 
 	reconcileRuntimeEnvironmentTimes(t, reconciler, environment.Name, 2)
 	current := getRuntimeEnvironment(t, kubeClient, environment.Name)
-	if provider.resetCalls != 1 || provider.lastReset.BlankRuntime == nil || current.Annotations[resetNonceAnnotation] != "1" {
-		t.Fatalf("blank reset calls=%d annotations=%#v binding=%#v", provider.resetCalls, current.Annotations, provider.lastReset)
+	if provider.resetCalls != 2 || provider.provisionCalls != 0 {
+		t.Fatalf("blank reset calls=%d provision calls=%d, want the wipe sustained and provision unreachable", provider.resetCalls, provider.provisionCalls)
 	}
+	if current.Status.Phase != runtimev2.PhaseReady || current.Status.Operation != runtimev2.OperationResetting {
+		t.Fatalf("blank status during wipe = %#v, want Ready+Resetting", current.Status)
+	}
+	if current.Annotations[resetNonceAnnotation] != "1" || current.Status.ObservedResetNonce != 1 {
+		t.Fatalf("blank reset adoption annotations=%#v status nonce=%d", current.Annotations, current.Status.ObservedResetNonce)
+	}
+
+	provider.reset = Observation{Ready: true}
+	reconcileRuntimeEnvironmentTimes(t, reconciler, environment.Name, 1)
+	current = getRuntimeEnvironment(t, kubeClient, environment.Name)
 	if current.Status.Phase != runtimev2.PhaseReady || current.Status.Operation != runtimev2.OperationNone {
-		t.Fatalf("blank status after reset = %#v", current.Status)
+		t.Fatalf("blank status after rebuilt ready = %#v, want the operation cleared", current.Status)
+	}
+	if provider.lastReset.BlankRuntime == nil {
+		t.Fatalf("blank reset binding = %#v", provider.lastReset)
 	}
 }
 

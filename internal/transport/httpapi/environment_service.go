@@ -106,6 +106,7 @@ type activeEnvironment struct {
 	Nodes                  []activeNode
 	Phase                  runtimev2.EnvironmentPhase
 	Operation              runtimev2.EnvironmentOperation
+	ObservedResetNonce     int64
 	Deleting               bool
 	ReadyAt                *metav1.Time
 	ExpiresAt              *metav1.Time
@@ -133,7 +134,7 @@ func environmentFromRuntime(environment *runtimev2.RuntimeEnvironment) *activeEn
 		UserID: labels["breakfix.dev/user"], ScenarioRef: labels["breakfix.dev/content-id"], SourceRevision: labels["breakfix.dev/content-revision"],
 		RunnableRevisionID: runnableRevisionID, RunnableRevisionDigest: runnableRevisionDigest,
 		Blank:   environment.Spec.BlankRuntime != nil,
-		Purpose: environment.Spec.Purpose, Phase: phase, Operation: environment.Status.Operation, Deleting: environment.DeletionTimestamp != nil,
+		Purpose: environment.Spec.Purpose, Phase: phase, Operation: environment.Status.Operation, ObservedResetNonce: environment.Status.ObservedResetNonce, Deleting: environment.DeletionTimestamp != nil,
 	}
 	if environment.Status.Lifecycle.ExpiresAt != nil {
 		expires := environment.Status.Lifecycle.ExpiresAt.DeepCopy()

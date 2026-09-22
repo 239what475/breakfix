@@ -227,6 +227,15 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              observedResetNonce:
+                description: |-
+                  ObservedResetNonce is the reset generation this controller has adopted:
+                  it starts at 0 at creation and increments with every adopted reset. The
+                  API projects it so consumers can tell a pre-wipe ready from a
+                  post-wipe one without temporal guessing.
+                format: int64
+                minimum: 0
+                type: integer
               operation:
                 enum:
                 - None

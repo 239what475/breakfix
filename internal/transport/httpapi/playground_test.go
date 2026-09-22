@@ -315,6 +315,24 @@ func TestPlaygroundResetFencesOnReady(t *testing.T) {
 		t.Fatalf("reset nonce = %d, want 1", nonce)
 	}
 
+	// The generation rides the status echo: the pre-reset read reports the
+	// environment as it was adopted, and once the controller adopts the reset
+	// the read reports the new generation even while the wipe is in flight.
+	recorder = playgroundRequest(handler, http.MethodGet, "", true)
+	if generation := playgroundBody(t, recorder).Generation; generation == nil || *generation != 0 {
+		t.Fatalf("pre-reset generation = %v, want 0", generation)
+	}
+	state.mu.Lock()
+	environment := state.environments[name]
+	environment.Status.Operation = runtimev2.OperationResetting
+	environment.Status.ObservedResetNonce = nonce
+	state.environments[name] = environment
+	state.mu.Unlock()
+	recorder = playgroundRequest(handler, http.MethodGet, "", true)
+	if generation := playgroundBody(t, recorder).Generation; generation == nil || *generation != nonce {
+		t.Fatalf("adopted reset generation = %v, want %d", generation, nonce)
+	}
+
 	// A failed session is no longer visible as a session: findPlaygroundEnvironment
 	// rejects non-live phases, so the read reports none and the next create
 	// clears and rebuilds the environment from scratch.

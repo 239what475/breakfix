@@ -1369,6 +1369,11 @@ components:
         runtime:
           type: string
           description: Runtime kind, for example k8s
+        generation:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Reset generation once a session exists; it increments with every adopted reset, so a ready observed after the generation moved belongs to the wiped environment
 
     PlaygroundCloseResponse:
       type: object

@@ -136,7 +136,14 @@ type RuntimeEnvironmentStatus struct {
 	// +kubebuilder:validation:Enum=Pending;Provisioning;Ready;Draining;Released;Failed
 	Phase EnvironmentPhase `json:"phase,omitempty"`
 	// +kubebuilder:validation:Enum=None;Resetting
-	Operation          EnvironmentOperation       `json:"operation,omitempty"`
+	Operation EnvironmentOperation `json:"operation,omitempty"`
+	// ObservedResetNonce is the reset generation this controller has adopted:
+	// it starts at 0 at creation and increments with every adopted reset. The
+	// API projects it so consumers can tell a pre-wipe ready from a
+	// post-wipe one without temporal guessing.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	ObservedResetNonce int64                      `json:"observedResetNonce,omitempty"`
 	ObservedGeneration int64                      `json:"observedGeneration,omitempty"`
 	Conditions         []metav1.Condition         `json:"conditions,omitempty"`
 	Runtime            RuntimeStatus              `json:"runtime,omitempty"`

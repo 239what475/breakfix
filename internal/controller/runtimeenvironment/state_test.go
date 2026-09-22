@@ -60,6 +60,50 @@ func TestDecideFencesResetAndReap(t *testing.T) {
 	}
 }
 
+// A reset in flight keeps deciding Reset even after the nonce is observed:
+// only the rebuilt terminal's Ready observation ends the operation, so the
+// adoptive Provision path can never clear it on stale resources.
+func TestDecideSustainsResetUntilRebuilt(t *testing.T) {
+	revision := validRevision(t)
+	digest, err := revision.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
+	plan := Plan{Revision: revision}
+	environment := runtimev2.RuntimeEnvironment{
+		ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(now)},
+		Spec:       runtimev2.RuntimeEnvironmentSpec{RunnableRevisionRef: &runtimev2.RunnableRevisionReference{ID: "revision-01", Digest: digest}, Purpose: runtimev2.PurposeLearning, Lease: runtimev2.LeaseSpec{RenewedAt: metav1.NewTime(now)}, ResetNonce: 1},
+		Status:     runtimev2.RuntimeEnvironmentStatus{Phase: runtimev2.PhaseReady, Operation: runtimev2.OperationResetting},
+	}
+	decision, err := Decide(environment, plan, now.Add(time.Minute), 1)
+	if err != nil || decision != DecisionReset {
+		t.Fatalf("in-flight reset decision = %q, %v", decision, err)
+	}
+	// The phase may legitimately still be Ready (the pre-wipe terminal) or
+	// Provisioning (a reset adopted mid-provision); both keep resetting.
+	environment.Status.Phase = runtimev2.PhaseProvisioning
+	decision, err = Decide(environment, plan, now.Add(time.Minute), 1)
+	if err != nil || decision != DecisionReset {
+		t.Fatalf("provisioning reset decision = %q, %v", decision, err)
+	}
+	// Lifecycle reclamation still wins over an in-flight reset: an expired
+	// lease drains instead of wiping.
+	environment.Status.Phase = runtimev2.PhaseReady
+	environment.Spec.Lease.RenewedAt = metav1.NewTime(now.Add(-2 * time.Hour))
+	decision, err = Decide(environment, plan, now.Add(time.Minute), 1)
+	if err != nil || decision != DecisionDrain {
+		t.Fatalf("expired reset decision = %q, %v", decision, err)
+	}
+	// Any other phase during a reset is a lifecycle inconsistency.
+	environment.Spec.Lease.RenewedAt = metav1.NewTime(now)
+	environment.Status.Phase = runtimev2.PhaseFailed
+	decision, err = Decide(environment, plan, now.Add(time.Minute), 1)
+	if err == nil || decision != DecisionNone || !strings.Contains(err.Error(), "invalid in phase") {
+		t.Fatalf("invalid reset phase decision = %q, %v", decision, err)
+	}
+}
+
 func TestValidateSpecRejectsRevisionOrProfileMismatch(t *testing.T) {
 	revision := validRevision(t)
 	digest, err := revision.Digest()

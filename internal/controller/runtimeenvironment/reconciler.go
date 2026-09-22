@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 const (
 	finalizer               = "breakfix.dev/runtime-environment-cleanup"
 	resetNonceAnnotation    = "breakfix.dev/observed-reset-nonce"
+	resetAdoptedAnnotation  = "breakfix.dev/reset-adopted-at"
 	provisionRequeue        = 2 * time.Second
 	providerRetryRequeue    = 5 * time.Second
 	reapStatusRequeue       = 2 * time.Second
@@ -138,11 +140,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 			}
 			return ctrl.Result{RequeueAfter: statusStepRequeue}, nil
 		}
-		timeoutSeconds := plan.Lifecycle().CreateTimeoutSeconds
-		if environment.Status.Operation == runtimev2.OperationResetting {
-			timeoutSeconds = plan.Lifecycle().ResetTimeoutSeconds
-		}
-		operationCtx, cancel := withLifecycleTimeout(ctx, timeoutSeconds)
+		// Provision is unreachable while Operation=Resetting: Decide keeps a
+		// reset on the Reset path until the rebuilt terminal reports Ready.
+		operationCtx, cancel := withLifecycleTimeout(ctx, plan.Lifecycle().CreateTimeoutSeconds)
 		defer cancel()
 		observation, err := r.Provider.Provision(operationCtx, binding)
 		if err != nil {
@@ -150,18 +150,27 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		}
 		return r.applyObservation(ctx, &environment, plan, observation, environment.Status.Operation)
 	case DecisionReset:
-		if environment.Annotations == nil {
-			environment.Annotations = make(map[string]string)
+		// A reset runs on one path to completion: wipe-until-gone, rebuild, and
+		// only a Ready observation of the rebuilt terminal clears the
+		// operation. Adoption writes the status first: a crash between the two
+		// writes leaves Operation=Resetting, which still decides Reset.
+		if environment.Status.Operation != runtimev2.OperationResetting {
+			if err := r.updateStatus(ctx, &environment, func(status *runtimev2.RuntimeEnvironmentStatus) {
+				status.Operation = runtimev2.OperationResetting
+				status.ObservedResetNonce = environment.Spec.ResetNonce
+			}); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
-		before := environment.DeepCopy()
-		environment.Annotations[resetNonceAnnotation] = fmt.Sprintf("%d", environment.Spec.ResetNonce)
-		if err := r.Patch(ctx, &environment, client.MergeFrom(before)); err != nil {
+		if err := r.observeResetRequest(ctx, &environment); err != nil {
 			return ctrl.Result{}, err
 		}
-		if err := r.updateStatus(ctx, &environment, func(status *runtimev2.RuntimeEnvironmentStatus) {
-			status.Operation = runtimev2.OperationResetting
-		}); err != nil {
-			return ctrl.Result{}, err
+		if adopted, ok := parseResetAdoptedAt(environment.Annotations); ok {
+			deadline := adopted.Add(time.Duration(plan.Lifecycle().ResetTimeoutSeconds) * time.Second)
+			if r.now().After(deadline) {
+				return r.fail(ctx, &environment, runnable.FailureInfrastructure, "runtime-environment", "reset-timeout",
+					fmt.Errorf("reset did not complete within %d seconds", plan.Lifecycle().ResetTimeoutSeconds))
+			}
 		}
 		operationCtx, cancel := withLifecycleTimeout(ctx, plan.Lifecycle().ResetTimeoutSeconds)
 		defer cancel()
@@ -373,6 +382,36 @@ func parseObservedResetNonce(annotations map[string]string) int64 {
 	var value int64
 	_, _ = fmt.Sscan(strings.TrimSpace(annotations[resetNonceAnnotation]), &value)
 	return value
+}
+
+// observeResetRequest records that the controller has observed the current
+// reset nonce. The write is idempotent: once the annotations match the spec,
+// repeated reconciles patch nothing. The adoption timestamp rides the same
+// patch and starts the reset's wall-clock budget.
+func (r *Reconciler) observeResetRequest(ctx context.Context, environment *runtimev2.RuntimeEnvironment) error {
+	if parseObservedResetNonce(environment.Annotations) == environment.Spec.ResetNonce {
+		if _, ok := parseResetAdoptedAt(environment.Annotations); ok {
+			return nil
+		}
+	}
+	if environment.Annotations == nil {
+		environment.Annotations = make(map[string]string)
+	}
+	before := environment.DeepCopy()
+	environment.Annotations[resetNonceAnnotation] = fmt.Sprintf("%d", environment.Spec.ResetNonce)
+	environment.Annotations[resetAdoptedAnnotation] = fmt.Sprintf("%d", r.now().Unix())
+	return r.Patch(ctx, environment, client.MergeFrom(before))
+}
+
+func parseResetAdoptedAt(annotations map[string]string) (time.Time, bool) {
+	if annotations == nil {
+		return time.Time{}, false
+	}
+	value, err := strconv.ParseInt(strings.TrimSpace(annotations[resetAdoptedAnnotation]), 10, 64)
+	if err != nil || value <= 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(value, 0).UTC(), true
 }
 
 func bounded(value string) string {
