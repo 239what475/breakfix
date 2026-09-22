@@ -4,12 +4,12 @@ import { AlertTriangle, Ban, RefreshCw, X } from "lucide-vue-next";
 import { useAdminEnvironments, isStuckEnvironment } from "./admin";
 import { clock, relative, shortId } from "./format";
 import { toActiveRef, toLoggedInRef } from "./refs";
-import type { AdminEnvironment } from "../../api/generated";
+import type { AdminEnvironment, AdminRunnableActionItem } from "../../api/generated";
 import "../../styles/dialog.css";
 import "./admin.css";
 
 const props = defineProps<{ active: boolean; loggedIn: boolean; refreshRequest: number }>();
-const { environments, reaps, playgroundMaxActive, loading, error, releasing, refresh, release } = useAdminEnvironments(
+const { environments, reaps, actions, actionSummary, playgroundMaxActive, loading, error, releasing, refresh, release } = useAdminEnvironments(
 	toActiveRef(props),
 	toLoggedInRef(props),
 );
@@ -66,6 +66,33 @@ function failureText(environment: AdminEnvironment) {
 	if (!environment.failure) return "";
 	const where = environment.failure.message || environment.failure.reason;
 	return `${environment.failure.component}: ${where}`;
+}
+
+// The summary chips follow the queue lifecycle order regardless of how the
+// server's count map happens to serialize; unknown states sort last.
+const actionStateOrder = ["queued", "running", "completed", "failed"];
+const actionStateCounts = computed(() =>
+	Object.entries(actionSummary.value.by_state)
+		.filter(([, count]) => count > 0)
+		.sort((a, b) => {
+			const left = actionStateOrder.indexOf(a[0]);
+			const right = actionStateOrder.indexOf(b[0]);
+			return (left === -1 ? actionStateOrder.length : left) - (right === -1 ? actionStateOrder.length : right) || a[0].localeCompare(b[0]);
+		}),
+);
+
+function failureTitle(action: AdminRunnableActionItem) {
+	return action.failure_class || action.failure_summary ? `${action.failure_class}: ${action.failure_summary}` : undefined;
+}
+
+// Live rows usually point into the future, so the label counts down instead
+// of borrowing relative(), which only knows how to look back; terminal rows
+// render their em dash directly in the template.
+function nextRunLabel(action: AdminRunnableActionItem) {
+	const seconds = Math.max(0, Math.round((new Date(action.next_run_at).getTime() - Date.now()) / 1000));
+	if (seconds < 60) return `${seconds}s 后`;
+	if (seconds < 5400) return `${Math.round(seconds / 60)}m 后`;
+	return `${Math.round(seconds / 3600)}h 后`;
 }
 
 // The release verb is a confirm-guarded nudge onto the existing drain path;
@@ -167,6 +194,33 @@ async function confirmRelease() {
 						<td><span class="admin-failure-note" :title="reap.last_error">{{ reap.last_error || "—" }}</span></td>
 						<td><span :title="clock(reap.next_attempt_at)">{{ relative(reap.next_attempt_at) }}</span></td>
 						<td><span :title="clock(reap.updated_at)">{{ relative(reap.updated_at) }}</span></td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+
+		<h3 class="admin-subsection-title">动作队列</h3>
+		<p class="admin-subsection-note">内容物化与验证的持久动作队列;`failed` 为显式终态——infra 失败指数退避重试,8 次预算耗尽后记 `attempts-exhausted`,artifact 失败立即失败。重新安装对 infra 失败自动开新周期,artifact 失败缓存 fail-fast(相同内容以相同方式失败);高亮行为服务端 `attempt-high` 旗标(尝试预算过半,≥4/8)。</p>
+		<div v-if="actionStateCounts.length" class="admin-action-summary">
+			<span v-for="[state, count] in actionStateCounts" :key="state" class="admin-phase-chip" :data-state="state">{{ state }} {{ count }}</span>
+		</div>
+		<p v-if="!actions.length" class="admin-empty">队列为空。</p>
+		<div v-else class="admin-table-wrap">
+			<table class="admin-table admin-action-table">
+				<thead>
+					<tr><th scope="col">动作 key</th><th scope="col">phase</th><th scope="col">状态</th><th scope="col">尝试</th><th scope="col">失败</th><th scope="col">下次运行</th></tr>
+				</thead>
+				<tbody>
+					<tr v-for="action in actions" :key="action.action_key" :class="{ 'admin-row-stuck': action.flag === 'attempt-high' }">
+						<td><span class="admin-mono">{{ shortId(action.action_key) }}</span></td>
+						<td><span class="admin-mono">{{ action.phase }}</span></td>
+						<td><span class="admin-phase-badge" :data-state="action.state">{{ action.state }}</span></td>
+						<td>{{ action.attempt }}</td>
+						<td><span class="admin-failure-note" :title="failureTitle(action)">{{ action.failure_code || "—" }}</span></td>
+						<td>
+							<template v-if="action.state === 'completed' || action.state === 'failed'">—</template>
+							<span v-else :title="clock(action.next_run_at)">{{ nextRunLabel(action) }}</span>
+						</td>
 					</tr>
 				</tbody>
 			</table>

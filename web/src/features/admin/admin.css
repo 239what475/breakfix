@@ -738,3 +738,27 @@
 .admin-reap-table td {
 	font: 11px "DM Mono", monospace;
 }
+
+/* Action queue states keep the five-color badge discipline: blue in flight,
+   green completed, red failed (already styled above); queued keeps the
+   neutral default. */
+.admin-phase-badge[data-state="running"] {
+	background: #e5f0f6;
+	color: #176a9d;
+}
+
+.admin-phase-badge[data-state="completed"] {
+	background: #e1f0e8;
+	color: #17614e;
+}
+
+.admin-action-summary {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin: 0 0 10px;
+}
+
+.admin-action-table td {
+	font: 11px "DM Mono", monospace;
+}

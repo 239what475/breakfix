@@ -1,6 +1,13 @@
 import { ref, watch, type Ref } from "vue";
 import { api, isLoggedIn, tokenUserRole } from "../../api/client";
-import type { AdminEnvironment, AdminHumanAction, AdminRunnableReap, AdminUser } from "../../api/generated";
+import type {
+	AdminEnvironment,
+	AdminHumanAction,
+	AdminRunnableActionItem,
+	AdminRunnableActionSummary,
+	AdminRunnableReap,
+	AdminUser,
+} from "../../api/generated";
 
 // useAdminAuthorization guards the admin surface at the display layer only.
 // The backend independently rejects non-admin calls with 403.
@@ -109,12 +116,15 @@ export function useAdminAudit(active: Ref<boolean>, loggedIn: Ref<boolean>) {
 }
 
 // useAdminEnvironments owns the environment observation page: one environment
-// list, the reap queue behind teardown, and the configured playground cap the
-// overview card reads from the system status. The release verb rides the
-// existing drain path and only nudges the controller.
+// list, the runnable action queue and the reap queue behind it, and the
+// configured playground cap the overview card reads from the system status.
+// The release verb rides the existing drain path and only nudges the
+// controller.
 export function useAdminEnvironments(active: Ref<boolean>, loggedIn: Ref<boolean>) {
 	const environments = ref<AdminEnvironment[]>([]);
 	const reaps = ref<AdminRunnableReap[]>([]);
+	const actions = ref<AdminRunnableActionItem[]>([]);
+	const actionSummary = ref<AdminRunnableActionSummary>({ by_state: {}, by_attempt: {} });
 	const playgroundMaxActive = ref<number | null>(null);
 	const loading = ref(false);
 	const error = ref("");
@@ -126,14 +136,17 @@ export function useAdminEnvironments(active: Ref<boolean>, loggedIn: Ref<boolean
 		loading.value = true;
 		error.value = "";
 		try {
-			const [list, reapList, system] = await Promise.all([
+			const [list, reapList, actionPage, system] = await Promise.all([
 				api.listAdminEnvironments(),
 				api.listAdminRunnableReaps(),
+				api.listAdminRunnableActions(),
 				api.getAdminSystem(),
 			]);
 			if (ticket !== request) return;
 			environments.value = list.environments;
 			reaps.value = reapList.reaps;
+			actions.value = actionPage.items;
+			actionSummary.value = actionPage.summary;
 			playgroundMaxActive.value = system.playground_max_active;
 		} catch (cause) {
 			if (ticket !== request) return;
@@ -162,7 +175,7 @@ export function useAdminEnvironments(active: Ref<boolean>, loggedIn: Ref<boolean
 		if (activeNow && loggedInNow) void refresh();
 	}, { immediate: true });
 
-	return { environments, reaps, playgroundMaxActive, loading, error, releasing, refresh, release };
+	return { environments, reaps, actions, actionSummary, playgroundMaxActive, loading, error, releasing, refresh, release };
 }
 
 // A Draining or Failed environment whose reference timestamp (failure time,

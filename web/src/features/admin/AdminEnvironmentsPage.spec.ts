@@ -1,7 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api/client";
-import type { AdminEnvironmentList, AdminRunnableReapList, AdminSystemStatus } from "../../api/generated";
+import type { AdminEnvironmentList, AdminRunnableActionPage, AdminRunnableReapList, AdminSystemStatus } from "../../api/generated";
 import { automockApi } from "../../test/client-mock";
 import { isStuckEnvironment, stuckThresholdMs } from "./admin";
 import AdminEnvironmentsPage from "./AdminEnvironmentsPage.vue";
@@ -49,6 +49,89 @@ const reaps: AdminRunnableReapList = {
 	],
 };
 
+// The map order is deliberately scrambled: the summary chips must sort by the
+// queue lifecycle, not by JSON key order.
+const runnableActions: AdminRunnableActionPage = {
+	summary: { by_state: { failed: 1, completed: 1, queued: 2, running: 1 }, by_attempt: { "0": 1, "2": 1, "6": 1, "8": 1 } },
+	items: [
+		{
+			action_key: "operations/s-one/r1/sha256:aaaaaaaa/materialize-artifact/1",
+			content_kind: "operations",
+			content_id: "s-one",
+			content_revision: "r1",
+			phase: "materialize-artifact",
+			state: "queued",
+			attempt: 2,
+			lease_expires_at: null,
+			next_run_at: new Date(Date.now() + 30_000).toISOString(),
+			failure_class: "infrastructure",
+			failure_code: "provider-unavailable",
+			failure_summary: "node pool saturated",
+			flag: "",
+		},
+		{
+			action_key: "operations/s-two/r1/sha256:bbbbbbbb/verify/1",
+			content_kind: "operations",
+			content_id: "s-two",
+			content_revision: "r1",
+			phase: "verify",
+			state: "running",
+			attempt: 6,
+			lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+			next_run_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+			failure_class: "",
+			failure_code: "",
+			failure_summary: "",
+			flag: "",
+		},
+		{
+			action_key: "operations/s-three/r1/sha256:cccccccc/materialize-artifact/1",
+			content_kind: "operations",
+			content_id: "s-three",
+			content_revision: "r1",
+			phase: "materialize-artifact",
+			state: "failed",
+			attempt: 8,
+			lease_expires_at: null,
+			next_run_at: new Date(Date.now() - 60_000).toISOString(),
+			failure_class: "infrastructure",
+			failure_code: "attempts-exhausted",
+			failure_summary: "provider kept failing",
+			flag: "attempt-high",
+		},
+		{
+			action_key: "operations/s-four/r1/sha256:dddddddd/materialize-artifact/1",
+			content_kind: "operations",
+			content_id: "s-four",
+			content_revision: "r1",
+			phase: "materialize-artifact",
+			state: "completed",
+			attempt: 1,
+			lease_expires_at: null,
+			next_run_at: new Date(Date.now() - 3_600_000).toISOString(),
+			failure_class: "",
+			failure_code: "",
+			failure_summary: "",
+			flag: "",
+		},
+		{
+			action_key: "operations/s-five/r1/sha256:eeeeeeee/materialize-artifact/1",
+			content_kind: "operations",
+			content_id: "s-five",
+			content_revision: "r1",
+			phase: "materialize-artifact",
+			state: "queued",
+			attempt: 0,
+			lease_expires_at: null,
+			next_run_at: new Date(Date.now() - 1000).toISOString(),
+			failure_class: "",
+			failure_code: "",
+			failure_summary: "",
+			flag: "",
+		},
+	],
+};
+
 const system: AdminSystemStatus = {
 	version: "dev",
 	commit: "deadbeef",
@@ -67,6 +150,7 @@ describe("AdminEnvironmentsPage", () => {
 		vi.clearAllMocks();
 		vi.mocked(api.listAdminEnvironments).mockResolvedValue(environments);
 		vi.mocked(api.listAdminRunnableReaps).mockResolvedValue(reaps);
+		vi.mocked(api.listAdminRunnableActions).mockResolvedValue(runnableActions);
 		vi.mocked(api.getAdminSystem).mockResolvedValue(system);
 	});
 
@@ -103,6 +187,58 @@ describe("AdminEnvironmentsPage", () => {
 		expect(rows[2].text()).toContain("provider unavailable");
 		expect(rows[2].classes()).toContain("admin-row-stuck");
 		expect(rows[2].findAll("td")[4].text()).not.toBe("—");
+	});
+
+	it("renders the action queue summary chips in lifecycle order", async () => {
+		const page = mountPage();
+		await flushPromises();
+
+		const chips = page.findAll(".admin-action-summary .admin-phase-chip");
+		expect(chips.map((chip) => chip.text())).toEqual(["queued 2", "running 1", "completed 1", "failed 1"]);
+	});
+
+	it("renders the action queue rows with failure diagnostics", async () => {
+		const page = mountPage();
+		await flushPromises();
+
+		const rows = page.findAll(".admin-action-table tbody tr");
+		expect(rows).toHaveLength(5);
+
+		// A retried infra row keeps its last failure visible while queued.
+		expect(rows[0].text()).toContain("provider-unavailable");
+		const failureNote = rows[0].get(".admin-failure-note");
+		expect(failureNote.attributes("title")).toContain("infrastructure");
+		expect(failureNote.attributes("title")).toContain("node pool saturated");
+		expect(rows[0].findAll("td")[5].text()).toMatch(/后$/);
+
+		// The explicit terminal failure carries the code, the server's
+		// attempt-high flag drives the highlight, and the next-run column
+		// goes quiet for terminal rows.
+		const failedBadge = rows[2].get(".admin-phase-badge");
+		expect(failedBadge.attributes("data-state")).toBe("failed");
+		expect(rows[2].text()).toContain("attempts-exhausted");
+		expect(rows[2].classes()).toContain("admin-row-stuck");
+		expect(rows[2].findAll("td")[5].text()).toBe("—");
+		const completedBadge = rows[3].get(".admin-phase-badge");
+		expect(completedBadge.attributes("data-state")).toBe("completed");
+		expect(rows[3].findAll("td")[5].text()).toBe("—");
+
+		// Only the flagged row is highlighted: the running row sits at attempt
+		// 6 (past the would-be front-end threshold) without the server flag,
+		// so a derived highlight would fail this count.
+		expect(page.findAll(".admin-action-table .admin-row-stuck")).toHaveLength(1);
+	});
+
+	it("shows the empty state when the action queue is idle", async () => {
+		vi.mocked(api.listAdminRunnableActions).mockResolvedValue({ summary: { by_state: {}, by_attempt: {} }, items: [] });
+		const page = mountPage();
+		await flushPromises();
+
+		expect(page.find(".admin-action-table").exists()).toBe(false);
+		expect(page.find(".admin-action-summary").exists()).toBe(false);
+		// The reap section keeps its own queue; only the action queue is idle.
+		const empties = page.findAll(".admin-empty").filter((node) => node.text() === "队列为空。");
+		expect(empties).toHaveLength(1);
 	});
 
 	it("filters the table by phase", async () => {

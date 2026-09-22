@@ -1,53 +1,44 @@
 # TODO
 
-已完成的阶段见 git 历史(最近:队列两阶段——死信 reap 退场 b96515e 与动作队列诚实失败
-040cf72,均于 2026-09-22 单提交交付;交付记录与验收证据见各自提交的 TODO 收口章)。当前
-阶段:admin 动作队列观测面。本文件保留当前阶段计划、未立项事项与挂起决策。
+已完成的阶段见 git 历史(最近:队列三阶段——死信 reap 退场 b96515e、动作队列诚实失败
+040cf72 与本提交的 admin 动作队列观测面,均于 2026-09-22 单提交交付;交付记录与验收
+证据见各自提交的 TODO 收口章)。本文件保留未立项事项与挂起决策。
 
-## 阶段:admin 动作队列观测面——补齐两条队列的观测对称
+## 阶段:admin 动作队列观测面——补齐两条队列的观测对称(2026-09-22 交付)
 
-### 定案
+### 交付记录
 
-- **服务端契约现成**:`GET /admin/runnable-actions`(openapi `listAdminRunnableActions`)
-  返回整队列汇总(byState/byAttempt)与条目列表——含 failure 三列与 `attempt-high` 旗标
-  (runnable_admin.go);条目级 state/phase 过滤可选,汇总始终覆盖全队列。
-- **前端零消费**:web 无 fetch、无页面区块(client.ts 只有 `listAdminRunnableReaps`)——
-  reap 队列有观测表,动作队列没有,观测不对称。
-- **时机**:动作阶段(040cf72)刚让队列状态变得有语义——`attempts-exhausted` 的 failed
-  行、退避中的 infra 重试行、缓存 fail-fast 的 artifact 失败行——但管理员只能隔着
-  工作流/安装失败间接感知,排障时看不到队列本体。
-- **后端零改动**:契约、handler、仓储观测查询全部现成;`attempt-high` 旗标阈值
-  (attempt≥4,runnable_admin.go:102)在新上限(8)语义下恰为"预算过半",不过时。卡住
-  高亮直接消费服务端旗标,不做前端派生——比 reap 侧的前端派生更权威的数据来源。
-- 边界:条目的 state/phase 过滤查询参数本阶段不接 UI(区块先做全量列表+汇总;过滤等有
-  真实排障需求再说)。
+- **client**:`web/src/api/client.ts` 增手写方法 `listAdminRunnableActions()`(GET
+  /admin/runnable-actions,镜像 `listAdminRunnableReaps` 的 request 封装);生成物类型
+  AdminRunnableActionPage/Item/Summary 已存在,零 generate,后端零改动。
+- **admin.ts**:`useAdminEnvironments` 的 `Promise.all` 增第四路拉取,新增 `actions` 与
+  `actionSummary` ref,随既有 refresh(进入页面、refreshRequest、释放后)一并刷新。
+- **AdminEnvironmentsPage.vue**:回收队列区块之后增"动作队列"区块——按状态汇总 chip 行
+  (queued/running/completed/failed 生命周期序,未知态按字典序殿后,零计数不渲染)+
+  表格(动作 key shortId、phase、状态徽标、尝试、失败 code 列 title 挂 class+summary、
+  下次运行:活行为倒计时标签"Ns/m/h 后"+clock 悬浮,终态行示 —,不借用只会回望的
+  relative());行高亮直接消费服务端 `flag === 'attempt-high'`,不做前端派生(与 reap
+  侧 attempt≥4 前端派生不同,数据来源更权威);区块注解写明产品语义:failed 为显式
+  终态,infra 失败 8 次预算耗尽记 attempts-exhausted,重装对 infra 失败自动开新周期、
+  artifact 失败缓存 fail-fast。
+- **admin.css**:补 `[data-state="running"]`(蓝,在飞)与 `[data-state="completed"]`
+  (绿,完成)徽标配色,遵循五色徽标纪律;failed 复用既有红、queued 走中性默认;增
+  `admin-action-summary` chip 行与 `admin-action-table` 等宽字体列。
+- **测试**:AdminEnvironmentsPage.spec 增三组断言——汇总 chip 按生命周期序渲染(by_state
+  键序打乱验证排序不受 JSON 序影响);行级失败诊断(queued 行保留上次 infra 失败的
+  code+title、failed 徽标 data-state、终态行下次运行示 —、活行示倒计时)、attempt-high
+  高亮唯一性(running 行 attempt 6 无旗标不高亮,证明消费服务端旗标而非前端派生阈值);
+  空态(空 items 无表格无 chip,回收队列区块不受影响)。
 
-### 任务
+### 验收证据
 
-- **client**:`web/src/api/client.ts` 增手写方法 `listAdminRunnableActions()`(镜像
-  `listAdminRunnableReaps` 的 request 封装);生成物类型
-  (AdminRunnableActionPage/Item/Summary)已存在,零 generate。
-- **admin.ts**:拉取并入既有 `Promise.all`,新增动作列表与汇总 ref,随 refresh 一起刷新。
-- **AdminEnvironmentsPage.vue**:回收队列区块之后增"动作队列"区块——汇总行(按状态
-  计数)+ 表格(动作 key(shortId)、phase、状态徽标、尝试、失败 code(title 挂
-  class+summary)、下次运行(终态行示 —))+ 行高亮消费 `flag === 'attempt-high'`;
-  区块注解写明产品语义(failed 为显式失败;重装对 infra 失败自动开新周期,artifact
-  失败缓存 fail-fast)。
-- **admin.css**:视需要补动作状态徽标配色(running/completed;failed 复用既有样式)。
-- **测试**:AdminEnvironmentsPage.spec 增动作区块断言——汇总渲染、failed 徽标、
-  attempt-high 行高亮、失败列 title、空态。
-
-### 提交切分
-
-单提交交付(`feat(admin): surface the runnable action queue in the console`):纯前端 +
-测试 + TODO 收口章。后端、openapi、schema、生成物零改动。
-
-### 验收门槛
-
-- 快车道全套:`make test-unit`、`make test-race`、`make verify-generated`、`make lint`、
-  `kubectl kustomize .`、`make web-test-unit` 全绿。
-- Go 侧零改动,不排 PG 门控(编译与既有套件已覆盖);行为断言由组件测试承担
-  (徽标/高亮/汇总/title/空态)。
+- 快车道全套:`make test-unit`、`make test-race`、`make verify-generated`、`make lint`
+  (0 issues)、`kubectl kustomize .`、`make web-test-unit`(8 files / 54 tests)全绿;
+  另跑 `vue-tsc -b` 类型检查通过(非门槛,build 路径背书)。
+- Go 侧零改动(git diff 仅 web/src 五文件),不排 PG 门控(编译与既有套件已覆盖);
+  行为断言由组件测试承担(徽标/高亮/汇总/title/空态)。
+- 条目级 state/phase 过滤查询参数本阶段未接 UI(与计划边界一致:先做全量列表+汇总,
+  过滤等有真实排障需求再说)。
 
 ## 未立项事项
 

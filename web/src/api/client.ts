@@ -32,6 +32,7 @@ import type {
 	AdminUserList,
 	AdminEnvironmentList,
 	AdminEnvironmentRelease,
+	AdminRunnableActionPage,
 	AdminRunnableReapList,
 	AdminSystemStatus,
 } from "./generated";
@@ -323,6 +324,7 @@ export const api = {
 	listAdminEnvironments: () => request<AdminEnvironmentList>("GET", "/admin/environments"),
 	releaseAdminEnvironment: (name: string) =>
 		request<AdminEnvironmentRelease>("POST", `/admin/environments/${encodeURIComponent(name)}/release`),
+	listAdminRunnableActions: () => request<AdminRunnableActionPage>("GET", "/admin/runnable-actions"),
 	listAdminRunnableReaps: () => request<AdminRunnableReapList>("GET", "/admin/runnable-reaps"),
 
 };
