@@ -1,73 +1,55 @@
 # TODO
 
-已完成的阶段见 git 历史(最近:文档入口换轨 c5e6bc0..本提交——退役解析管道,换 admin
-维护的 key+url iframe 聚合页;交付记录与验收证据见本提交的 TODO 收口章)。本文件保留
-未立项事项与挂起待决策。
+已完成的阶段见 git 历史(最近:文档入口换轨 c5e6bc0..3588e93(+审查修正 22e1a0b)——退役
+解析管道,换 admin 维护的 key+url iframe 聚合页;交付记录与验收证据见 3588e93 的 TODO
+收口章)。本文件保留当前阶段与未立项事项。
 
-## 阶段:文档入口换轨——退役解析管道,换 admin 维护的 key+url iframe 聚合页(2026-09-22 交付)
+## 阶段:遗留词汇清理——documentation-example 退役(2026-09-22 定案,本文件即执行计划)
 
-### 交付记录
+### 0. 背景与定案
 
-- **提交 1(c5e6bc0)新增侧后端——表、CRUD 与单测**:`documentation_links` 表
-  (schema baseline 54→55)落全局共享列表:key 为服务端生成的短随机 id(`doc-` + hex,
-  改名不失效)、title 非空非唯一、url 仅绝对 http(s)、embed 布尔默认开。领域规则收在
-  新包 `internal/domain/doclinks`(包名避开了 Go 工具链的保留包名
-  `documentation`——包名为 `documentation` 的文件会被构建系统整体忽略,这是本次踩到的
-  冷坑)。openapi 纯增量:公开 `GET /documentation/links` + admin 写三件套
-  `POST/PATCH/DELETE /admin/documentation/links[/{key}]`,`make generate` 前后端生成物
-  同步;handler 照 environment_admin 惯例挂 jwtMW+RequireAdmin,create/update/delete
-  各记一条 `documentation.link.write` 审计(audit 封闭动词表扩员,detail 携带
-  op/title/url),服务端与仓储两处同规则校验 title/URL。单测覆盖权限拒止(匿名 401、
-  member 403)、校验 400、未知 key 404、CRUD/创建序排序/唯一 key。
-- **提交 2(ceaf166)前端聚合页替换 reader**:`/documentation` 换新页面——左侧单列
-  列表(active 态,admin 末尾"添加"行与项上 hover 设置按钮、小屏常驻)+右侧内容区;
-  可嵌入条目进 iframe keep-alive 池(v-show 保活、LRU 上限 5、节点复用切换不重载);
-  `?doc=<key>` 刷新与历史遍历恢复选中;embed=false 渲染 URL 卡;工具栏常驻"在新窗口
-  打开"(noopener noreferrer,iframe 另加 referrerpolicy=no-referrer);900px 抽屉
-  (Contents+遮罩+选中即收起)、桌面折叠按钮;admin 对话框收名称/URL/嵌入开关,提交前
-  同服务端规则校验、重名仅提示不阻塞、失败回显在对话框内不丢已输内容,删除当前选中项
-  后右侧回空态;URL hash `?doc=<key>` 随选中 pushState。旧 reader(markdown-it+Shiki
-  渲染、toc、fixtures、组件测)与 reader e2e 冒烟同提交退役;AppShell 入口改直链
-  `/documentation` 并向页面传 isAdmin。
-- **提交 3(本提交)删除旧链路与收口**:openapi 删旧三端点(page/tree/asset)与
-  `AdminDocumentationDeployment`(`AdminSystemStatus.documentation` 字段随之移除);
-  后端删除 `internal/docsproject/`(约 3500 行)、`internal/adapter/documentation/`、
-  `cmd/docs-project/`、`documentation_read.go`(+test)、server.go 三条路由、
-  handlers.go 的 documentationLibrary DI、bootstrap 接线(documentation.go 与
-  server.go 两处)、config 的 DocumentationConfig 块与校验及单测、报告链收尾
-  (system.go、SystemDocumentationReport、system_admin.go 投影段、environment_admin_test
-  断言改绑);仅注释级引用同步改写(environment_service.go、playground_test.go、
-  controller/blank.go、e2e-prepare.sh、e2e-bootstrap-core.sh)。构建部署清理:Makefile
-  的 docs-* 与 documentation-library-image 目标、DOCS_SITE_SCRIPT/DOCS_PROJECT 变量、
-  build/images/documentation-library/、server.yaml 的库挂载与镜像卷、两份 config 样例
-  的 documentation 块、.gitignore 的 docs-site 条目;docs-site/ 整目录退役(三个跟踪
-  文件 git rm,未跟踪的 public/documents 约 1.5GB 本地 rm)。CI 侧 nightly/release 剔除
-  文档管道步骤,docs-upstream-canary 工作流整体删除。测试链更名:e2e-documentation
-  prepare 改造为 playground 专用(只保留 max_active 钉定、busybox 预热、Catalog 投影
-  等待与 prepared 标记),`test/fixtures/docs-project/` 删除,playground.e2e.spec.ts 移
-  至 `test/playground/`,playwright 配置与 Makefile/脚本/npm script 全部更名
-  test-e2e-playground;新增聚合页 e2e 冒烟(见验收证据)。admin 控制台腿随首账号语义
-  移入冒烟:playground 套件的注册用户不再假设自己是 admin。文档同步:
-  system-architecture.md(聚合页与 documentation_links)、api-contracts.md(公开读 +
-  admin 写三件套契约)、NEXT.md(产品叙述改为运维现场焦点,删除"多文档源扩展"——
-  聚合页模型下新增文档源即 admin 增加一条链接)、operations/testing.md(套件更名与
-  playground 冒烟说明)。遗留词汇 `documentation-example` 枚举与
-  MySpaceScenarioContentSource 按 0.4 决策未动。
+1. **最后的死词汇**:文档练习产品删除(9809890)后,`documentation-example` 已无任何
+   生产者,现存引用全是校验分支、两条 DB CHECK 与 my-space 来源徽标;且与新的
+   /documentation 聚合页名词撞车,持续制造混淆。文档换轨时按当时 0.4 决策刻意留下,
+   本阶段独立清掉。
+2. **收窄而非掘除(定案)**:`ScenarioType` 与 `scenario_type` 列保留为类型扩展缝
+   (scenario.go 注释本就如此声明),仅删除 documentation-example 值与全部分支;
+   `MySpaceScenarioContentSource`(content_source 字段、openapi 枚举、三个 my-space
+   组件的来源徽标与 sourceLabel)因只剩单一值而整体删除——恒定徽标是噪音,字段是
+   死词汇。
+3. **破坏性演进可接受**:schema baseline 55→56,两条 CHECK 收窄为
+   ('operations-scenario')(开发式破坏迁移重库,无存量保留问题,前例 53→54);openapi
+   MySpaceScenario 移除必填 content_source,前后端生成物同提交同步;首次真实发布尚未
+   发生,无外部消费者。
 
-### 验收证据
+### 1. 改动清单(单提交)
 
-- 快车道:`make test-unit`(postgres 全接,含 documentation_links 仓储 CRUD/排序/唯一
-  key 与 handler 权限/校验/审计链路)、`make test-race`、`make web-test-unit`(49 通过,
-  含 keep-alive LRU 驱逐、?doc 恢复、对话框校验/重名提示/失败回显、抽屉与折叠、
-  AppShell isAdmin 转发)、`make verify-generated`、`make lint` 全绿。
-- `make test-e2e-playground`:2 通过(聚合页冒烟 + playground 全链路)2.3 分钟。冒烟:
-  首账号经 API 注册即 bootstrap admin,POST 两条链接(embed 开/关)→ 公开列表返回
-  2 条→ 匿名浏览器渲染列表且 admin 控件隐藏→ iframe src=录入 URL、referrerpolicy
-  就位→"在新窗口打开"noopener noreferrer→ embed=false 渲染 URL 卡→ `?doc=<key>`
-  重载恢复选中→ 注入 admin token 重载后添加行与设置按钮出现→ 管理台环境观测渲染且
-  容量卡显示 "/ 1"。playground:create→ready→终端 marker 落盘→reset→generation 严格
-  递增→marker 文件消失→新 marker 回显→第二用户 create 429→close→none。
-- `kubectl kustomize .` 渲染通过;`make build`(嵌入前端)通过。
+- [ ] content/scenario:删 ScenarioDocumentationExample 常量,Valid() 收窄,
+      ScenarioType 与 RequireOperationsScenario 注释改写(去掉"Documentation examples
+      use their own source"的过时叙述);materialize.go 两处"must not contain tags"
+      分支删除;portable.go 类型文案改为仅 operations-scenario、删 tags 分支;
+- [ ] 三处 tag 规范子句收窄:domain/scenario/lifecycle.go、domain/catalog/runtime.go、
+      adapter/postgres/generation_repository.go 的
+      `|| (Type==DocumentationExample && len(tags)!=0)`;
+- [ ] schema:schema_catalog.go 与 schema_generation.go 的 CHECK 收窄,baseline 55→56;
+- [ ] my-space:my_space.go 删 mySpaceContentSource 映射与 ContentSource 赋值;openapi
+      删 content_source(属性+required),make generate 两侧同步;三个组件删
+      sourceLabel 与徽标(AuthoringOverview 的 eyebrow 与 LearningHistory/
+      ActiveEnvironmentList 的 pill,注意分隔符残留),ActiveEnvironmentList.spec 的
+      fixture 同步;
+- [ ] 测试:handlers_test 删 ContentSource 用例;content_validation 的"tagged
+      documentation-example"负向测试改期类型错误;generator/source 两个 ingress 负向
+      测试断言对齐新错误路径(documentation-example 从"ingress 拒绝"变为"内容校验
+      即拒");
+- 验证:`make test-unit`;`make test-race`;`make web-test-unit`;
+  `make verify-generated`;`make lint`;`npm run --prefix web build`;
+  `kubectl kustomize .`。
+
+### 2. 风险与对策
+
+- **错误文案变更是行为变化**:既有两个负向测试期望"operations module accepts only
+  operations-scenario",收窄后 content 校验先行拒绝、文案不同——测试对齐,无对外契约。
+- **CHECK 收窄 + 破坏迁移**:开发库重置语义已接受;生产未发生。
 
 ## 未立项事项
 
@@ -77,9 +59,7 @@
 - playground 的 node/Incus 类型、多实例(集合 API)、终态断言(学习闭环)若做另行立项;
 - 工作区崩溃孤儿沙箱/PVC 清扫(authoring 侧遗留);
 - js-yaml ×3 等 Dependabot;ollama critical 无上游修复;#15 typescript 7 等 vue-tsc 跟进;
-- 首次真实发布后部署侧验证无凭证直拉;
-- documentation-example 枚举与 MySpaceScenarioContentSource 的遗留词汇清理(牵 DB
-  CHECK/catalog/generation/my-space,独立决策后另行立项)。
+- 首次真实发布后部署侧验证无凭证直拉。
 
 ## 挂起待决策(不排期)
 
