@@ -245,7 +245,6 @@ export type MySpaceScenario = {
     id: string;
     title: string;
     runtime: 'node' | 'k8s';
-    content_source: 'operations' | 'documentation';
 };
 
 export type MySpaceProfile = {

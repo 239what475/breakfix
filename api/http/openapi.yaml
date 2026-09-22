@@ -1692,7 +1692,7 @@ components:
 
     MySpaceScenario:
       type: object
-      required: [id, title, runtime, content_source]
+      required: [id, title, runtime]
       properties:
         id:
           type: string
@@ -1701,9 +1701,6 @@ components:
         runtime:
           type: string
           enum: [node, k8s]
-        content_source:
-          type: string
-          enum: [operations, documentation]
     MySpaceProfile:
       type: object
       required: [id, name, created_at]
@@ -1762,6 +1759,10 @@ components:
         kind:
           type: string
           enum: [playground, operations]
+          # oapi-codegen shortens enum constant names globally when they stop
+          # colliding; pin the qualified names so removing unrelated enums
+          # cannot rename these constants under us.
+          x-enum-varnames: [MySpaceActiveEnvironmentKindPlayground, MySpaceActiveEnvironmentKindOperations]
           description: playground entries carry no scenario identity or checkpoint progress
         scenario:
           $ref: "#/components/schemas/MySpaceScenario"

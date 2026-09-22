@@ -32,12 +32,9 @@ function stateLabel(item: MySpaceLearningHistory) {
   return item.state === "active" ? "In progress" : "Attempt ended";
 }
 function checkpointFirstPassLabel(item: MySpaceLearningHistory) {
-  const count = item.checkpoint_first_passes.length;
-  if (!count) return "";
-  return `${count} checkpoint${count === 1 ? "" : "s"} first passed`;
-}
-function sourceLabel(source: MySpaceLearningHistory["scenario"]["content_source"]) {
-  return source === "documentation" ? "Documentation" : "Operations";
+	const count = item.checkpoint_first_passes.length;
+	if (!count) return "";
+	return `${count} checkpoint${count === 1 ? "" : "s"} first passed`;
 }
 function updateState(event: Event) {
   emit("update:stateFilter", (event.target as HTMLSelectElement).value as LearningStateFilter);
@@ -63,7 +60,7 @@ function updateRuntime(event: Event) {
           <CheckCircle2 v-if="item.completed_at" :size="18" aria-hidden="true" />
           <CircleDashed v-else :size="18" aria-hidden="true" />
         </div>
-        <div class="space-row-main"><div class="space-row-title"><h3>{{ item.scenario.title }}</h3><span class="runtime-pill">{{ sourceLabel(item.scenario.content_source) }}</span></div><p>{{ stateLabel(item) }} · {{ date(item.state === "completed" ? item.completed_at ?? item.ready_at : item.ready_at) }}<span v-if="checkpointFirstPassLabel(item)"> · {{ checkpointFirstPassLabel(item) }}</span></p></div>
+        <div class="space-row-main"><div class="space-row-title"><h3>{{ item.scenario.title }}</h3></div><p>{{ stateLabel(item) }} · {{ date(item.state === "completed" ? item.completed_at ?? item.ready_at : item.ready_at) }}<span v-if="checkpointFirstPassLabel(item)"> · {{ checkpointFirstPassLabel(item) }}</span></p></div>
         <span class="history-duration"><Clock3 :size="13" aria-hidden="true" />{{ duration(item.learning_seconds) }}</span>
       </article>
     </div>

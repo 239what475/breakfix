@@ -379,18 +379,10 @@ func (h *Handler) mySpaceAuthoring(ctx context.Context, userID string) (api.MySp
 
 func mySpaceScenario(entry scenario.Entry) api.MySpaceScenario {
 	return api.MySpaceScenario{
-		Id:            entry.ID,
-		Title:         entry.Title,
-		Runtime:       api.MySpaceScenarioRuntime(entry.Runtime),
-		ContentSource: mySpaceContentSource(entry.Type),
+		Id:      entry.ID,
+		Title:   entry.Title,
+		Runtime: api.MySpaceScenarioRuntime(entry.Runtime),
 	}
-}
-
-func mySpaceContentSource(scenarioType scenario.ScenarioType) api.MySpaceScenarioContentSource {
-	if scenarioType == scenario.ScenarioDocumentationExample {
-		return api.MySpaceScenarioContentSourceDocumentation
-	}
-	return api.MySpaceScenarioContentSourceOperations
 }
 
 func authoringSessionTitle(title string) string {

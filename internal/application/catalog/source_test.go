@@ -110,7 +110,7 @@ func TestPortableSourceRejectsDocumentationExample(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := LoadPortableSource(root); err == nil || !strings.Contains(err.Error(), "operations module accepts only operations-scenario") {
+	if _, err := LoadPortableSource(root); err == nil || !strings.Contains(err.Error(), "必须为 operations-scenario") {
 		t.Fatalf("LoadPortableSource error = %v", err)
 	}
 }

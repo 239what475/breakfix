@@ -64,7 +64,7 @@ nodes:
 	writeGeneratorTestFile(t, filepath.Join(dir, "nodes", "host", "initialize.sh"), "#!/bin/sh\n")
 
 	_, err := ValidateCandidateDir(dir)
-	if err == nil || !strings.Contains(err.Error(), "operations module accepts only operations-scenario") {
+	if err == nil || !strings.Contains(err.Error(), "必须为 operations-scenario") {
 		t.Fatalf("ValidateCandidateDir error = %v", err)
 	}
 }

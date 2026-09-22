@@ -6,12 +6,8 @@ const props = defineProps<{ environments: MySpaceActiveEnvironment[]; stoppingId
 const emit = defineEmits<{ start: [id: string]; stop: [id: string] }>();
 
 function checkpointLabel(environment: MySpaceActiveEnvironment) {
-  if (!environment.checkpoint_progress || environment.checkpoint_progress.total === 0) return "No checkpoints";
-  return `${environment.checkpoint_progress.passed}/${environment.checkpoint_progress.total} checkpoints`;
-}
-
-function sourceLabel(source: string | undefined) {
-  return source === "documentation" ? "Documentation" : "Operations";
+	if (!environment.checkpoint_progress || environment.checkpoint_progress.total === 0) return "No checkpoints";
+	return `${environment.checkpoint_progress.passed}/${environment.checkpoint_progress.total} checkpoints`;
 }
 
 const phaseLabels: Record<string, string> = { Pending: "Preparing", Provisioning: "Preparing", Ready: "Ready", Draining: "Draining" };
@@ -51,7 +47,7 @@ function expiryLabel(expiresAt?: string | null) {
             <div class="space-row-meta"><span>{{ phaseLabel(environment) }}</span><span><TimerReset :size="13" aria-hidden="true" />{{ expiryLabel(environment.expires_at) }}</span></div>
           </template>
           <template v-else-if="environment.scenario">
-            <div class="space-row-title"><h3>{{ environment.scenario.title }}</h3><span class="runtime-pill">{{ sourceLabel(environment.scenario.content_source) }}</span><span class="runtime-pill">{{ environment.runtime }}</span></div>
+            <div class="space-row-title"><h3>{{ environment.scenario.title }}</h3><span class="runtime-pill">{{ environment.runtime }}</span></div>
             <div class="space-row-meta"><span>{{ checkpointLabel(environment) }}</span><span><TimerReset :size="13" aria-hidden="true" />{{ expiryLabel(environment.expires_at) }}</span></div>
           </template>
         </div>

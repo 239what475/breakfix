@@ -730,7 +730,7 @@ func (d *GenerationRepository) FinalizeGenerationScenarioPublication(ctx context
 		return errors.New("generation publication finalization is invalid")
 	}
 	canonical, err := scenario.NormalizeTags(tags)
-	if err != nil || !slices.Equal(canonical, tags) || (scenarioType == scenario.ScenarioDocumentationExample && len(tags) != 0) {
+	if err != nil || !slices.Equal(canonical, tags) {
 		return errors.New("generation publication tags are invalid")
 	}
 	tx, err := d.conn.BeginTx(ctx, nil)

@@ -162,7 +162,7 @@ func (e Entry) Valid() bool {
 		return false
 	}
 	canonicalTags, err := scenario.NormalizeTags(e.Tags)
-	if err != nil || !slices.Equal(canonicalTags, e.Tags) || (e.Type == scenario.ScenarioDocumentationExample && len(e.Tags) != 0) {
+	if err != nil || !slices.Equal(canonicalTags, e.Tags) {
 		return false
 	}
 	if e.RunnableRevisionRef != nil && e.RunnableRevisionRef.Validate() != nil {

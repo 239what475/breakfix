@@ -43,7 +43,7 @@ func ValidatePortableDir(dir string) (*Entry, error) {
 	}
 	typeValue := NormalizeScenarioType(manifestScalar(spec["type"]))
 	if !typeValue.Valid() {
-		errs = append(errs, fmt.Sprintf("scenario.yaml type 必须为 documentation-example 或 operations-scenario，当前为 %q", typeValue))
+		errs = append(errs, fmt.Sprintf("scenario.yaml type 必须为 operations-scenario，当前为 %q", typeValue))
 	}
 	if tags, exists := spec["tags"]; exists {
 		var values []string
@@ -54,8 +54,6 @@ func ValidatePortableDir(dir string) (*Entry, error) {
 			errs = append(errs, fmt.Sprintf("scenario.yaml tags 必须是字符串数组: %v", unmarshalErr))
 		} else if _, tagErr := NormalizeTags(values); tagErr != nil {
 			errs = append(errs, fmt.Sprintf("scenario.yaml tags 无效: %v", tagErr))
-		} else if typeValue == ScenarioDocumentationExample && len(values) > 0 {
-			errs = append(errs, "documentation-example 不得包含 tags")
 		}
 	}
 	if manifestScalar(spec["description"]) == "" {

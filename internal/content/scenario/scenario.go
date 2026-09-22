@@ -8,19 +8,17 @@ import (
 	"unicode/utf8"
 )
 
-// ScenarioType retains the serialized type of historical Scenario revisions.
-// New operations Catalog and authoring entry points accept only
-// ScenarioOperationsScenario; the documentation practice ground is a blank
-// environment, not a scenario type.
+// ScenarioType is the serialized type of Scenario revisions. Only
+// ScenarioOperationsScenario exists today; the field stays as the seam a
+// future second content kind would extend.
 type ScenarioType string
 
 const (
-	ScenarioDocumentationExample ScenarioType = "documentation-example"
-	ScenarioOperationsScenario   ScenarioType = "operations-scenario"
+	ScenarioOperationsScenario ScenarioType = "operations-scenario"
 )
 
 func (t ScenarioType) Valid() bool {
-	return t == ScenarioDocumentationExample || t == ScenarioOperationsScenario
+	return t == ScenarioOperationsScenario
 }
 
 func NormalizeScenarioType(value string) ScenarioType {
@@ -32,8 +30,8 @@ func NormalizeScenarioType(value string) ScenarioType {
 }
 
 // RequireOperationsScenario keeps the operations product boundary explicit at
-// its ingress points. Documentation examples use their own source and
-// publication flow instead of entering the operations Catalog.
+// its ingress points: a future second type must grow its own source and
+// publication flow instead of entering the operations Catalog silently.
 func RequireOperationsScenario(entry *Entry) error {
 	if entry == nil {
 		return fmt.Errorf("operations scenario is required")

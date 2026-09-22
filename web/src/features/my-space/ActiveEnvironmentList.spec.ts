@@ -38,7 +38,7 @@ describe("ActiveEnvironmentList", () => {
 						kind: "operations",
 						runtime: "node",
 						phase: "Ready",
-						scenario: { id: "demo", title: "Demo challenge", runtime: "node", content_source: "operations" },
+						scenario: { id: "demo", title: "Demo challenge", runtime: "node" },
 						checkpoint_progress: { passed: 1, total: 3 },
 					},
 				],

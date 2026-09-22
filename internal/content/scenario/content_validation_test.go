@@ -142,18 +142,18 @@ func TestValidatePortableDirNormalizesOperationsScenarioTags(t *testing.T) {
 	}
 }
 
-func TestValidatePortableDirRejectsTaggedDocumentationExample(t *testing.T) {
+func TestValidatePortableDirRejectsLegacyDocumentationExampleType(t *testing.T) {
 	root := t.TempDir()
 	writeTeachingScenario(t, root, "hints/complete.md", "<!-- checkpoint: complete -->\n")
 	data, err := os.ReadFile(filepath.Join(root, "scenario.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest := append([]byte("type: documentation-example\ntags: [k8s]\n"), data...)
+	manifest := append([]byte("type: documentation-example\n"), data...)
 	if err := os.WriteFile(filepath.Join(root, "scenario.yaml"), manifest, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ValidatePortableDir(root); err == nil || !strings.Contains(err.Error(), "不得包含 tags") {
+	if _, err := ValidatePortableDir(root); err == nil || !strings.Contains(err.Error(), "必须为 operations-scenario") {
 		t.Fatalf("ValidatePortableDir error = %v", err)
 	}
 }

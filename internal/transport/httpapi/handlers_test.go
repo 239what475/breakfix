@@ -16,7 +16,6 @@ import (
 	"github.com/breakfix/breakfix/internal/adapter/postgres"
 	appcatalog "github.com/breakfix/breakfix/internal/application/catalog"
 	"github.com/breakfix/breakfix/internal/bootstrap/config"
-	"github.com/breakfix/breakfix/internal/content/scenario"
 	testpostgres "github.com/breakfix/breakfix/internal/testkit/postgres"
 	api "github.com/breakfix/breakfix/internal/transport/httpapi/generated"
 	"github.com/gin-gonic/gin"
@@ -34,17 +33,6 @@ func TestReadinessUsesMaterializedCatalogIntegrity(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "scenarios", "demo", testPublishedScenarioRevisionID, "solution.md"), "<!-- checkpoint: complete -->\nchanged\n")
 	if err := handler.validateReadiness(context.Background()); err == nil || !errors.Is(err, appcatalog.ErrMaterializedIntegrity) {
 		t.Fatalf("changed catalog readiness error = %v", err)
-	}
-}
-
-func TestMySpaceScenarioContentSourceReflectsItsModule(t *testing.T) {
-	operations := mySpaceScenario(scenario.Entry{ID: "chal-operations", Title: "Operations", Runtime: scenario.RuntimeNode, Type: scenario.ScenarioOperationsScenario})
-	if operations.ContentSource != api.MySpaceScenarioContentSourceOperations {
-		t.Fatalf("operations source = %q", operations.ContentSource)
-	}
-	documentation := mySpaceScenario(scenario.Entry{ID: "chal-documentation", Title: "Documentation", Runtime: scenario.RuntimeK8s, Type: scenario.ScenarioDocumentationExample})
-	if documentation.ContentSource != api.MySpaceScenarioContentSourceDocumentation {
-		t.Fatalf("documentation source = %q", documentation.ContentSource)
 	}
 }
 

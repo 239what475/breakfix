@@ -122,7 +122,7 @@ func (r Revision) Valid() bool {
 		return false
 	}
 	canonicalTags, err := content.NormalizeTags(r.Tags)
-	if err != nil || !slices.Equal(canonicalTags, r.Tags) || (r.Type == content.ScenarioDocumentationExample && len(r.Tags) != 0) {
+	if err != nil || !slices.Equal(canonicalTags, r.Tags) {
 		return false
 	}
 	return true

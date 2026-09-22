@@ -128,10 +128,8 @@ func ValidateDir(dir string) (*Entry, error) {
 	if !NormalizeScenarioType(string(scenario.Type)).Valid() {
 		return nil, fmt.Errorf("unsupported scenario type %q", scenario.Type)
 	}
-	if tags, err := NormalizeTags(scenario.Tags); err != nil {
+	if _, err := NormalizeTags(scenario.Tags); err != nil {
 		return nil, err
-	} else if scenario.Type == ScenarioDocumentationExample && len(tags) > 0 {
-		return nil, fmt.Errorf("documentation-example must not contain tags")
 	}
 	switch scenario.Runtime {
 	case RuntimeNode, RuntimeK8s:
@@ -188,10 +186,8 @@ func ValidateCandidateDir(dir string) (*Entry, error) {
 	if !NormalizeScenarioType(string(scenario.Type)).Valid() {
 		return nil, fmt.Errorf("unsupported scenario type %q", scenario.Type)
 	}
-	if tags, err := NormalizeTags(scenario.Tags); err != nil {
+	if _, err := NormalizeTags(scenario.Tags); err != nil {
 		return nil, err
-	} else if scenario.Type == ScenarioDocumentationExample && len(tags) > 0 {
-		return nil, fmt.Errorf("documentation-example must not contain tags")
 	}
 	switch scenario.Runtime {
 	case RuntimeNode, RuntimeK8s:

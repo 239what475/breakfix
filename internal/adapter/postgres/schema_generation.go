@@ -48,7 +48,7 @@ var schemaGenerationStatements = []string{
 		source_revision_id TEXT NOT NULL,
 		base_active_revision_id TEXT NOT NULL DEFAULT '',
 		title TEXT NOT NULL,
-		scenario_type TEXT NOT NULL CHECK (scenario_type IN ('documentation-example', 'operations-scenario')),
+		scenario_type TEXT NOT NULL CHECK (scenario_type IN ('operations-scenario')),
 		tags JSONB NOT NULL DEFAULT '[]'::jsonb,
 		content_revision TEXT NOT NULL,
 		source_slug TEXT NOT NULL,
