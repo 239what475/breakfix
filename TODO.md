@@ -47,6 +47,13 @@ reap 退场、动作队列诚实失败(两者独立,谁先做都行)。本文件
   queued";`runnable_repository_test.go` 删 Deadletter 用例;`AdminEnvironmentsPage.spec.ts`
   的 dead 徽标断言改为长期卡住行的高亮断言。
 
+### 提交切分
+
+单提交交付(`feat(runtimeenvironment): drop the reap dead letter and retry
+forever at capped backoff`):域与 Reaper、Postgres 与 schema 58、openapi 与生成物、
+admin 页与全部测试、TODO 收口章并入同一提交——改动面小,且门禁要求 openapi/生成物/
+schema 原子一致,验收通过后收口章随本提交。
+
 ### 验收门槛
 
 - 快车道全套:`make test-unit`、`make test-race`、`make verify-generated`、`make lint`、
@@ -115,6 +122,12 @@ artifact:场景在自身批准期限内跑不完按内容之过处理,一次完�
   (attempt 超限仍可认领,直至失败汇报显式转移);重调度对 infra-failed 重置、对
   artifact-failed 缓存;deadline-exceeded 归 artifact;coordinator/installer 对 failed
   动作不再等待、走各自失败路径;既有"报告携带 artifact 失败即完成"不回归。
+
+### 提交切分
+
+单提交交付(`feat(runnable): make action exhaustion an honest failure`):
+repository、worker、coordinator、installer 与全部测试、TODO 收口章并入同一提交,验收
+通过后收口章随本提交。
 
 ### 验收门槛
 
