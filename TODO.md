@@ -1,55 +1,42 @@
 # TODO
 
-已完成的阶段见 git 历史(最近:文档入口换轨 c5e6bc0..3588e93(+审查修正 22e1a0b)——退役
-解析管道,换 admin 维护的 key+url iframe 聚合页;交付记录与验收证据见 3588e93 的 TODO
-收口章)。本文件保留当前阶段与未立项事项。
+已完成的阶段见 git 历史(最近:遗留词汇清理 0672621..本提交——documentation-example
+枚举与 MySpaceScenarioContentSource 退役;交付记录与验收证据见本提交的 TODO 收口章)。
+本文件保留未立项事项与挂起决策。
 
-## 阶段:遗留词汇清理——documentation-example 退役(2026-09-22 定案,本文件即执行计划)
+## 阶段:遗留词汇清理——documentation-example 退役(2026-09-22 交付)
 
-### 0. 背景与定案
+### 交付记录
 
-1. **最后的死词汇**:文档练习产品删除(9809890)后,`documentation-example` 已无任何
-   生产者,现存引用全是校验分支、两条 DB CHECK 与 my-space 来源徽标;且与新的
-   /documentation 聚合页名词撞车,持续制造混淆。文档换轨时按当时 0.4 决策刻意留下,
-   本阶段独立清掉。
-2. **收窄而非掘除(定案)**:`ScenarioType` 与 `scenario_type` 列保留为类型扩展缝
-   (scenario.go 注释本就如此声明),仅删除 documentation-example 值与全部分支;
-   `MySpaceScenarioContentSource`(content_source 字段、openapi 枚举、三个 my-space
-   组件的来源徽标与 sourceLabel)因只剩单一值而整体删除——恒定徽标是噪音,字段是
-   死词汇。
-3. **破坏性演进可接受**:schema baseline 55→56,两条 CHECK 收窄为
-   ('operations-scenario')(开发式破坏迁移重库,无存量保留问题,前例 53→54);openapi
-   MySpaceScenario 移除必填 content_source,前后端生成物同提交同步;首次真实发布尚未
-   发生,无外部消费者。
+- **提交 1(bdc99b7)单提交实现**:收窄而非掘除——`ScenarioType` 与 `scenario_type` 列
+  保留为类型扩展缝,`operations-scenario` 成为唯一合法值(schema baseline 55→56,
+  schema_catalog/schema_generation 两条 CHECK 同步收窄);删除 ScenarioDocumentationExample
+  常量、materialize 两处与 portable 一处的 tags 分支、lifecycle/catalog-runtime/
+  generation-repository 三处 tag 规范子句;RequireOperationsScenario 保留为 ingress
+  守卫,过时注释("Documentation examples use their own source")改写为面向未来类型的
+  边界叙述。MySpaceScenarioContentSource 因只剩单一值整体删除:openapi 的 content_source
+  (必填字段+枚举)、my_space.go 的映射函数、三个 my-space 组件的 sourceLabel 与徽标
+  (AuthoringOverview eyebrow 去首段、LearningHistory/ActiveEnvironmentList 去 pill),
+  生成物两侧同步,ActiveEnvironmentList.spec fixture 同步。
+- **冷坑(oapi-codegen 全局常量名去重)**:content-source 枚举删除后,"operations" 值
+  不再跨枚举撞名,生成器把无关的 MySpaceActiveEnvironmentKind 常量静默改名为裸的
+  Operations/Playground,编译断裂。以 `x-enum-varnames` 把该枚举常量名钉死
+  (openapi 内留注释记录机制)——无关枚举的增删从此不会再改名这些常量。这是生成物
+  命名稳定性的第一个已知实例,后续新枚举若含通用值宜同样钉名。
+- **测试**:handlers_test 的 ContentSource 用例删除(连同 scenario 导入);三个负向
+  测试改期——documentation-example 从"ingress 拒绝"(RequireOperationsScenario 文案)
+  变为"内容校验即拒"(portable 的"必须为 operations-scenario"),断言对齐、用例更名
+  (Tagged→LegacyType);全库仅剩 3 处 documentation-example 字符串,全部是负向夹具
+  (故意写入非法类型断言被拒),属正确形态。
 
-### 1. 改动清单(单提交)
+### 验收证据
 
-- [ ] content/scenario:删 ScenarioDocumentationExample 常量,Valid() 收窄,
-      ScenarioType 与 RequireOperationsScenario 注释改写(去掉"Documentation examples
-      use their own source"的过时叙述);materialize.go 两处"must not contain tags"
-      分支删除;portable.go 类型文案改为仅 operations-scenario、删 tags 分支;
-- [ ] 三处 tag 规范子句收窄:domain/scenario/lifecycle.go、domain/catalog/runtime.go、
-      adapter/postgres/generation_repository.go 的
-      `|| (Type==DocumentationExample && len(tags)!=0)`;
-- [ ] schema:schema_catalog.go 与 schema_generation.go 的 CHECK 收窄,baseline 55→56;
-- [ ] my-space:my_space.go 删 mySpaceContentSource 映射与 ContentSource 赋值;openapi
-      删 content_source(属性+required),make generate 两侧同步;三个组件删
-      sourceLabel 与徽标(AuthoringOverview 的 eyebrow 与 LearningHistory/
-      ActiveEnvironmentList 的 pill,注意分隔符残留),ActiveEnvironmentList.spec 的
-      fixture 同步;
-- [ ] 测试:handlers_test 删 ContentSource 用例;content_validation 的"tagged
-      documentation-example"负向测试改期类型错误;generator/source 两个 ingress 负向
-      测试断言对齐新错误路径(documentation-example 从"ingress 拒绝"变为"内容校验
-      即拒");
-- 验证:`make test-unit`;`make test-race`;`make web-test-unit`;
-  `make verify-generated`;`make lint`;`npm run --prefix web build`;
-  `kubectl kustomize .`。
-
-### 2. 风险与对策
-
-- **错误文案变更是行为变化**:既有两个负向测试期望"operations module accepts only
-  operations-scenario",收窄后 content 校验先行拒绝、文案不同——测试对齐,无对外契约。
-- **CHECK 收窄 + 破坏迁移**:开发库重置语义已接受;生产未发生。
+- 快车道全套:`make test-unit`、`make test-race`、`make web-test-unit`(51 通过)、
+  `make verify-generated`(生成物无漂移)、`make lint`(0 issues)、
+  `npm run --prefix web build`、`kubectl kustomize .` 全绿。
+- 残留扫描:`grep documentation-example|ScenarioDocumentationExample|
+  MySpaceScenarioContentSource internal/ api/ web/src/` 仅命中上述 3 处负向夹具,
+  生产代码与 openapi 零残留。
 
 ## 未立项事项
 
