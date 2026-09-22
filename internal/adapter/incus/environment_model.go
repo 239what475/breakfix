@@ -39,6 +39,11 @@ type ProvisionNodeEnvironmentRequest struct {
 	NetworkPolicyRevision string
 	Identity              NodeEnvironmentIdentity
 	Resources             NodeEnvironmentResources
+	// ResetNonce is the reset generation this request belongs to; zero means
+	// an ordinary provision or release. A reset fences its wipe on the value:
+	// a project already stamped with it is the reset's own rebuild and is
+	// never deleted again, so a retried reset converges instead of loop.
+	ResetNonce int64
 }
 
 type NodeInitialization struct {

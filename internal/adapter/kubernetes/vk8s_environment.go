@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/breakfix/breakfix/internal/adapter/vcluster"
@@ -31,6 +32,10 @@ const (
 	vk8sTerminalNetworkPolicyName     = "breakfix-vk8s-terminal"
 	vk8sRuntimeServiceAccount         = "breakfix-runtime"
 	vk8sInitSentinel                  = "/var/lib/breakfix/.initialized"
+	// vk8sResetGenerationAnnotation stamps a namespace with the reset
+	// generation that recreated it. A retried reset skips deletion once the
+	// stamp matches, so the rebuild a reset started is adopted, not wiped.
+	vk8sResetGenerationAnnotation = "breakfix.dev/reset-generation"
 	// vk8sBlankDeferEnv asks the base image entrypoint to defer initialization
 	// without a runnable bundle marker; blank terminals carry no content.
 	vk8sBlankDeferEnv = "BREAKFIX_DEFER_INITIALIZATION"
@@ -178,6 +183,12 @@ func (p *vk8sEnvironmentProvider) Delete(ctx context.Context, request environmen
 	if err := verifyVK8sNamespaceOwner(namespace, request); err != nil && !vclusterNamespaceOwnershipCompatible(namespace, request) {
 		return false, err
 	}
+	// A namespace already stamped with this request's reset generation is the
+	// rebuild this reset created: the wipe is complete and deletion must not
+	// run again, or a reset would erase its own progress forever.
+	if namespaceCarriesResetGeneration(namespace, request) {
+		return true, nil
+	}
 	_, err = p.vcluster.Delete(ctx, vcluster.DeleteOptions{
 		Name: request.Identity.VClusterName, Namespace: request.Identity.Namespace,
 	})
@@ -216,16 +227,22 @@ func (p *vk8sEnvironmentProvider) ensureNamespace(ctx context.Context, request e
 	if !k8serrors.IsNotFound(err) {
 		return fmt.Errorf("get VK8s namespace: %w", err)
 	}
+	annotations := map[string]string{
+		vk8sEnvironmentUIDAnnotation:      request.EnvironmentUID,
+		vk8sEnvironmentRevisionAnnotation: request.Revision,
+	}
+	// The rebuild of a reset recreates the namespace stamped with that reset's
+	// generation: from then on the wipe side of the reset adopts it.
+	if request.ResetNonce > 0 {
+		annotations[vk8sResetGenerationAnnotation] = strconv.FormatInt(request.ResetNonce, 10)
+	}
 	_, err = namespaces.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name: request.Identity.Namespace,
 		Labels: map[string]string{
 			"app.kubernetes.io/part-of": "breakfix",
 			vk8sRuntimeLabel:            vk8sRuntimeLabelValue,
 		},
-		Annotations: map[string]string{
-			vk8sEnvironmentUIDAnnotation:      request.EnvironmentUID,
-			vk8sEnvironmentRevisionAnnotation: request.Revision,
-		},
+		Annotations: annotations,
 	}}, metav1.CreateOptions{})
 	if err != nil && !k8serrors.IsAlreadyExists(err) {
 		return fmt.Errorf("create VK8s namespace: %w", err)
@@ -238,6 +255,13 @@ func verifyVK8sNamespaceOwner(namespace *corev1.Namespace, request environment.V
 		return fmt.Errorf("VK8s namespace %q has different ownership metadata", request.Identity.Namespace)
 	}
 	return nil
+}
+
+// namespaceCarriesResetGeneration reports whether the namespace was recreated
+// by this request's own reset generation: the wipe is done and only the
+// rebuild can be in progress.
+func namespaceCarriesResetGeneration(namespace *corev1.Namespace, request environment.VK8sProvisionRequest) bool {
+	return request.ResetNonce > 0 && namespace.Annotations[vk8sResetGenerationAnnotation] == strconv.FormatInt(request.ResetNonce, 10)
 }
 
 // vk8sRevisionFenceSatisfied compares the frozen revision annotation with the

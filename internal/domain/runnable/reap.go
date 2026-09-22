@@ -44,12 +44,15 @@ func (p EnvironmentPurpose) Valid() bool {
 // complete immutable runnable revision so lifecycle consumers never receive a
 // mutable artifact reference from an Environment object. A blank environment
 // carries no revision: BlankRuntime supplies the installed runtime definition
-// instead and RunnableRevision stays zero-valued.
+// instead and RunnableRevision stays zero-valued. ResetNonce is the reset
+// generation the binding targets; providers fence their wipe on it so a
+// retried reset adopts its own rebuild instead of deleting it again.
 type EnvironmentBinding struct {
 	Namespace        string             `json:"namespace"`
 	Name             string             `json:"name"`
 	UID              string             `json:"uid"`
 	Purpose          EnvironmentPurpose `json:"purpose"`
+	ResetNonce       int64              `json:"reset_nonce,omitempty"`
 	RunnableRevision RunnableRevision   `json:"runnable_revision"`
 	BlankRuntime     *BlankRuntimePlan  `json:"blank_runtime,omitempty"`
 }

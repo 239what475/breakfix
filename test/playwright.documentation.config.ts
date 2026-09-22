@@ -15,8 +15,9 @@ export default defineConfig({
   projects: [
     // The playground drives one real vk8s environment per user through
     // create, terminal, reset, and close; it stays on one worker because the
-    // environment is the user's single session.
-    { name: "playground-e2e", testMatch: /playground\.e2e\.spec\.ts$/, workers: 1, timeout: 30 * 60_000 },
+    // environment is the user's single session. The reset leg waits for a
+    // physical wipe plus rebuild, so the budget covers two full provisions.
+    { name: "playground-e2e", testMatch: /playground\.e2e\.spec\.ts$/, workers: 1, timeout: 40 * 60_000 },
     // Thin reader smoke: the generated content contract from the external
     // docs-project generator plus the viewport-driven surfaces.
     { name: "reader-smoke", testMatch: /reader\.smoke\.spec\.ts$/ },

@@ -20,9 +20,12 @@ import (
 )
 
 const (
-	environmentUIDKey        = "user.breakfix.environment_uid"
-	revisionKey              = "user.breakfix.revision"
-	resourceKindKey          = "user.breakfix.resource_kind"
+	environmentUIDKey = "user.breakfix.environment_uid"
+	revisionKey       = "user.breakfix.revision"
+	resourceKindKey   = "user.breakfix.resource_kind"
+	// resetGenerationKey stamps a project with the reset generation that
+	// recreated it, fencing a retried reset's wipe against its own rebuild.
+	resetGenerationKey       = "user.breakfix.reset_generation"
 	logicalNodeKey           = "user.breakfix.logical_node"
 	profileRevisionKey       = "user.breakfix.profile_revision"
 	networkPolicyRevisionKey = "user.breakfix.network_policy_revision"
@@ -170,6 +173,13 @@ func (c *Client) DeleteNodeEnvironment(ctx context.Context, request ProvisionNod
 		projectExists = false
 	} else if err := validateOwner(project.Config, request.EnvironmentUID, request.Revision, "project", identity.Project); err != nil {
 		return err
+	}
+
+	// A project already stamped with this request's reset generation is the
+	// rebuild this reset created: the wipe is complete and deletion must not
+	// run again, or a reset would erase its own progress forever.
+	if projectExists && projectCarriesResetGeneration(project.Config, request) {
+		return nil
 	}
 
 	if projectExists {
@@ -662,6 +672,11 @@ func (c *Client) environmentProject(request ProvisionNodeEnvironmentRequest) (ap
 		return api.ProjectsPost{}, fmt.Errorf("%w: invalid aggregate node process limit", ErrInvalid)
 	}
 	config := ownerConfig(request.EnvironmentUID, request.Revision, "project")
+	// The rebuild of a reset recreates the project stamped with that reset's
+	// generation: from then on the wipe side of the reset adopts it.
+	if request.ResetNonce > 0 {
+		config[resetGenerationKey] = strconv.FormatInt(request.ResetNonce, 10)
+	}
 	for key, value := range map[string]string{
 		"features.images":                          "true",
 		"features.networks":                        "false",
@@ -867,10 +882,33 @@ func overlapsAnyPrefix(candidate netip.Prefix, occupied []netip.Prefix) bool {
 }
 
 func validateEnvironmentProject(current *api.Project, expected api.ProjectsPost, request ProvisionNodeEnvironmentRequest) error {
-	if current == nil || current.Name != expected.Name || current.Description != expected.Description || !equalStringMap(current.Config, expected.Config) {
+	// The reset-generation stamp is wipe fencing, not policy: a project may
+	// legitimately carry a stamp a plain provision's expectation lacks.
+	if current == nil || current.Name != expected.Name || current.Description != expected.Description ||
+		!equalStringMap(ignoreResetGeneration(current.Config), ignoreResetGeneration(expected.Config)) {
 		return fmt.Errorf("%w: environment project %q differs from expected policy", ErrInvariant, request.Identity.Project)
 	}
 	return nil
+}
+
+func ignoreResetGeneration(config api.ConfigMap) api.ConfigMap {
+	if _, stamped := config[resetGenerationKey]; !stamped {
+		return config
+	}
+	filtered := make(api.ConfigMap, len(config)-1)
+	for key, value := range config {
+		if key != resetGenerationKey {
+			filtered[key] = value
+		}
+	}
+	return filtered
+}
+
+// projectCarriesResetGeneration reports whether the project was recreated by
+// this request's own reset generation: the wipe is done and only the rebuild
+// can be in progress.
+func projectCarriesResetGeneration(config api.ConfigMap, request ProvisionNodeEnvironmentRequest) bool {
+	return request.ResetNonce > 0 && config[resetGenerationKey] == strconv.FormatInt(request.ResetNonce, 10)
 }
 
 func validateEnvironmentImage(current *api.Image, fingerprint string) error {

@@ -126,6 +126,11 @@ type VK8sProvisionRequest struct {
 	// the installed management terminal image and initialization deferral is
 	// requested through the environment instead of a runnable bundle marker.
 	Blank bool
+	// ResetNonce is the reset generation this request belongs to; zero means
+	// an ordinary provision or release. A reset fences its wipe on the value:
+	// resources already stamped with it are this reset's own rebuild and are
+	// never deleted again, so a retried reset converges instead of loop.
+	ResetNonce int64
 }
 
 type VK8sEnvironmentObservation struct {

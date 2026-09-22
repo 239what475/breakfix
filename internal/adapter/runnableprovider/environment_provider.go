@@ -84,7 +84,9 @@ func (p *EnvironmentProvider) Provision(ctx context.Context, binding runtimeenvi
 
 // Reset removes only the stable resource set bound to this revision, then
 // recreates it from the same immutable artifact. A K8s namespace may be
-// asynchronous to delete, in which case the Controller will retry Reset.
+// asynchronous to delete, in which case the Controller will retry Reset; the
+// request carries the reset generation so a retry adopts the rebuild it
+// started instead of deleting it again.
 func (p *EnvironmentProvider) Reset(ctx context.Context, binding runtimeenvironment.Binding) (runtimeenvironment.Observation, error) {
 	switch p.bindingRuntime(binding) {
 	case runnable.RuntimeNode:
@@ -92,18 +94,20 @@ func (p *EnvironmentProvider) Reset(ctx context.Context, binding runtimeenvironm
 		if err != nil {
 			return runtimeenvironment.Observation{}, err
 		}
+		request.ResetNonce = binding.ResetNonce
 		if err := p.node.DeleteNodeEnvironment(ctx, request); err != nil {
 			if errors.Is(err, environment.ErrProviderNotFound) {
-				return p.provisionNode(ctx, binding)
+				return p.provisionNodeRequest(ctx, request)
 			}
 			return runtimeenvironment.Observation{}, fmt.Errorf("reset Node environment: %w", err)
 		}
-		return p.provisionNode(ctx, binding)
+		return p.provisionNodeRequest(ctx, request)
 	case runnable.RuntimeK8s:
 		request, err := p.k8sRequest(binding)
 		if err != nil {
 			return runtimeenvironment.Observation{}, err
 		}
+		request.ResetNonce = binding.ResetNonce
 		done, err := p.k8s.Delete(ctx, request)
 		if err != nil {
 			return runtimeenvironment.Observation{}, fmt.Errorf("reset K8s environment: %w", err)
@@ -111,7 +115,7 @@ func (p *EnvironmentProvider) Reset(ctx context.Context, binding runtimeenvironm
 		if !done {
 			return runtimeenvironment.Observation{}, nil
 		}
-		return p.provisionK8s(ctx, binding)
+		return p.provisionK8sRequest(ctx, request)
 	default:
 		return runtimeenvironment.Observation{}, runnable.NewArtifactFailure("runtime-unsupported", "runnable runtime is unsupported")
 	}
@@ -169,6 +173,10 @@ func (p *EnvironmentProvider) provisionNode(ctx context.Context, binding runtime
 	if err != nil {
 		return runtimeenvironment.Observation{}, err
 	}
+	return p.provisionNodeRequest(ctx, request)
+}
+
+func (p *EnvironmentProvider) provisionNodeRequest(ctx context.Context, request incus.ProvisionNodeEnvironmentRequest) (runtimeenvironment.Observation, error) {
 	observation, err := p.node.ProvisionNodeEnvironment(ctx, request)
 	if err != nil {
 		return runtimeenvironment.Observation{}, fmt.Errorf("provision Node environment: %w", err)
@@ -194,6 +202,10 @@ func (p *EnvironmentProvider) provisionK8s(ctx context.Context, binding runtimee
 	if err != nil {
 		return runtimeenvironment.Observation{}, err
 	}
+	return p.provisionK8sRequest(ctx, request)
+}
+
+func (p *EnvironmentProvider) provisionK8sRequest(ctx context.Context, request environment.VK8sProvisionRequest) (runtimeenvironment.Observation, error) {
 	observation, err := p.k8s.Provision(ctx, request)
 	if err != nil {
 		return runtimeenvironment.Observation{}, fmt.Errorf("provision K8s environment: %w", err)

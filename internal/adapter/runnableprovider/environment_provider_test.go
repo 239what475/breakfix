@@ -85,6 +85,54 @@ func TestEnvironmentProviderTreatsMissingNodeResourcesAsReleased(t *testing.T) {
 	}
 }
 
+// Only the reset path fences on the reset generation: the wipe and the rebuild
+// it triggers both carry the nonce, while plain provisioning and release never
+// stamp or skip, so a deferred reset still wipes what provisioning adopted.
+func TestEnvironmentProviderFencesOnlyTheResetPathOnTheGeneration(t *testing.T) {
+	revision := providerRevision(t, runnable.RuntimeK8s)
+	node := &fakeNodeEnvironmentProvider{}
+	k8s := &fakeK8sEnvironmentProvider{}
+	provider := testEnvironmentProvider(t, node, k8s)
+	binding := runtimeenvironment.Binding{Namespace: "breakfix-system", Name: "environment-01", UID: "environment-uid", Purpose: runnable.PurposeLearning, ResetNonce: 3, RunnableRevision: revision}
+
+	if _, err := provider.Provision(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+	if k8s.request.ResetNonce != 0 {
+		t.Fatalf("plain provision fenced on the reset generation: %#v", k8s.request)
+	}
+	if _, err := provider.Reset(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+	if k8s.deleteRequest.ResetNonce != 3 {
+		t.Fatalf("reset wipe carried no generation fence: %#v", k8s.deleteRequest)
+	}
+	if k8s.request.ResetNonce != 3 {
+		t.Fatalf("reset rebuild carried no generation fence: %#v", k8s.request)
+	}
+	if _, err := provider.Release(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+	if k8s.deleteRequest.ResetNonce != 0 {
+		t.Fatalf("release fenced on the reset generation: %#v", k8s.deleteRequest)
+	}
+
+	nodeRevision := providerRevision(t, runnable.RuntimeNode)
+	nodeBinding := runtimeenvironment.Binding{Namespace: "breakfix-system", Name: "environment-01", UID: "environment-uid", Purpose: runnable.PurposeLearning, ResetNonce: 3, RunnableRevision: nodeRevision}
+	if _, err := provider.Reset(context.Background(), nodeBinding); err != nil {
+		t.Fatal(err)
+	}
+	if node.deleteRequest.ResetNonce != 3 || node.request.ResetNonce != 3 {
+		t.Fatalf("Node reset fences: delete=%#v provision=%#v", node.deleteRequest, node.request)
+	}
+	if _, err := provider.Provision(context.Background(), nodeBinding); err != nil {
+		t.Fatal(err)
+	}
+	if node.request.ResetNonce != 0 {
+		t.Fatalf("plain Node provision fenced on the reset generation: %#v", node.request)
+	}
+}
+
 func testEnvironmentProvider(t *testing.T, node NodeEnvironmentProvider, k8s K8sEnvironmentProvider) *EnvironmentProvider {
 	t.Helper()
 	provider, err := NewEnvironmentProvider(node, k8s, EnvironmentProviderConfig{
@@ -113,10 +161,11 @@ func providerRevision(t *testing.T, runtimeType runnable.Runtime) runnable.Runna
 }
 
 type fakeNodeEnvironmentProvider struct {
-	request     incus.ProvisionNodeEnvironmentRequest
-	provisioned int
-	deleted     int
-	deleteErr   error
+	request       incus.ProvisionNodeEnvironmentRequest
+	deleteRequest incus.ProvisionNodeEnvironmentRequest
+	provisioned   int
+	deleted       int
+	deleteErr     error
 }
 
 func (p *fakeNodeEnvironmentProvider) NodeEnvironmentIdentity(_ string, names []string) (incus.NodeEnvironmentIdentity, error) {
@@ -133,7 +182,8 @@ func (p *fakeNodeEnvironmentProvider) ProvisionNodeEnvironment(_ context.Context
 	return incus.NodeEnvironmentObservation{Identity: request.Identity, Ready: true}, nil
 }
 
-func (p *fakeNodeEnvironmentProvider) DeleteNodeEnvironment(_ context.Context, _ incus.ProvisionNodeEnvironmentRequest) error {
+func (p *fakeNodeEnvironmentProvider) DeleteNodeEnvironment(_ context.Context, request incus.ProvisionNodeEnvironmentRequest) error {
+	p.deleteRequest = request
 	p.deleted++
 	return p.deleteErr
 }

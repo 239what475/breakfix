@@ -228,7 +228,7 @@ func (r *Reconciler) blankPlan(provider string) (runnable.BlankRuntimePlan, erro
 // deletion must stay resolvable without an installed plan, so the deletion
 // path may pass a zero plan and rely on the provider's k8s-only fallback.
 func environmentBinding(environment *runtimev2.RuntimeEnvironment, plan Plan) Binding {
-	binding := Binding{Namespace: environment.Namespace, Name: environment.Name, UID: string(environment.UID), Purpose: runnable.EnvironmentPurpose(environment.Spec.Purpose), RunnableRevision: plan.Revision}
+	binding := Binding{Namespace: environment.Namespace, Name: environment.Name, UID: string(environment.UID), Purpose: runnable.EnvironmentPurpose(environment.Spec.Purpose), ResetNonce: environment.Spec.ResetNonce, RunnableRevision: plan.Revision}
 	if plan.Blank != nil {
 		binding.BlankRuntime = plan.Blank
 	}

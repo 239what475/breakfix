@@ -35,6 +35,31 @@ func TestVClusterNamespaceOwnershipAcceptsChartMetadataAfterReset(t *testing.T) 
 	}
 }
 
+// The reset generation fence decides whether a retried reset wipes or adopts:
+// a namespace stamped with the request's own generation is the rebuild that
+// reset created, while any other state — unstamped, older generation, or a
+// zero (provision/release) request — must delete.
+func TestNamespaceResetGenerationFenceAdoptsOnlyTheCurrentRebuild(t *testing.T) {
+	reset := environment.VK8sProvisionRequest{EnvironmentUID: "environment-uid", Revision: "revision", ResetNonce: 3, Identity: environment.VK8sEnvironmentIdentity{Namespace: "breakfix-vk8s-environment"}}
+	stamped := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: reset.Identity.Namespace, Annotations: map[string]string{vk8sResetGenerationAnnotation: "3"}}}
+	if !namespaceCarriesResetGeneration(stamped, reset) {
+		t.Fatal("the rebuild of this reset generation was not adopted")
+	}
+	older := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: reset.Identity.Namespace, Annotations: map[string]string{vk8sResetGenerationAnnotation: "2"}}}
+	if namespaceCarriesResetGeneration(older, reset) {
+		t.Fatal("an older generation's namespace was adopted as the rebuild")
+	}
+	unstamped := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: reset.Identity.Namespace}}
+	if namespaceCarriesResetGeneration(unstamped, reset) {
+		t.Fatal("an unstamped namespace was adopted as the rebuild")
+	}
+	plain := reset
+	plain.ResetNonce = 0
+	if namespaceCarriesResetGeneration(stamped, plain) {
+		t.Fatal("a provision or release request adopted the reset rebuild")
+	}
+}
+
 func TestVClusterNamespaceOwnershipAcceptsBlankReleaseWithoutDigestFence(t *testing.T) {
 	// A blank environment provisioned before a controller upgrade freezes the
 	// plan digest into the namespace; release carries no digest and must clear
