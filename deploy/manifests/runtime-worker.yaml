@@ -25,7 +25,7 @@ spec:
         fsGroup: 65532
       containers:
         - name: runtime-worker
-          image: ghcr.io/breakfix/breakfix-runtime-worker:dev
+          image: ghcr.io/239what475/breakfix-runtime-worker:dev
           imagePullPolicy: IfNotPresent
           args: ["-config", "/etc/breakfix/config.yaml"]
           ports:

@@ -160,8 +160,8 @@ make -C "$repo_root" images
 # the bytes never change between them - the second full import measured at
 # minutes of pure duplicate work.
 runtime_images=$(kubectl kustomize "$repo_root" | awk '
-  /^[[:space:]]*image: ghcr.io\/breakfix\/breakfix-/ { print $2 }
-  /^[[:space:]]*reference: ghcr.io\/breakfix\/breakfix-/ { print $2 }
+  /^[[:space:]]*image: ghcr.io\/239what475\/breakfix-/ { print $2 }
+  /^[[:space:]]*reference: ghcr.io\/239what475\/breakfix-/ { print $2 }
 ')
 [ -n "$runtime_images" ] || fail "could not find Breakfix runtime images in the root manifest"
 for image in $runtime_images; do

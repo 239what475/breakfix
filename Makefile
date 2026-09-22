@@ -35,7 +35,7 @@ TEST_DEPS_STAMP := $(TEST_DIR)/node_modules/.breakfix-deps
 BIN_DIR := bin
 TARGETOS ?= linux
 TARGETARCH ?= amd64
-RUNTIME_IMAGE_REPOSITORY ?= ghcr.io/breakfix
+RUNTIME_IMAGE_REPOSITORY ?= ghcr.io/239what475
 RUNTIME_IMAGE_TAG ?= dev
 
 CATALOG_SOURCE ?=

@@ -51,9 +51,9 @@ jobs:
           kubectl kustomize . > "dist/breakfix-$RUNTIME_IMAGE_TAG.yaml"
           for component in server controller runtime-worker; do
             reference="$(cat "/tmp/breakfix-$component.ref")"
-            sed -i "s|ghcr.io/breakfix/breakfix-$component:dev|$reference|g" "dist/breakfix-$RUNTIME_IMAGE_TAG.yaml"
+            sed -i "s|ghcr.io/239what475/breakfix-$component:dev|$reference|g" "dist/breakfix-$RUNTIME_IMAGE_TAG.yaml"
           done
-          ! grep -Eq 'ghcr.io/breakfix/breakfix-(server|controller|runtime-worker):dev' "dist/breakfix-$RUNTIME_IMAGE_TAG.yaml"
+          ! grep -Eq 'ghcr.io/239what475/breakfix-(server|controller|runtime-worker):dev' "dist/breakfix-$RUNTIME_IMAGE_TAG.yaml"
       - name: Release deployment artifact
         uses: softprops/action-gh-release@v3
         with:

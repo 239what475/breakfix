@@ -23,16 +23,17 @@ Kind Registry 的 NodePort、开发 CA 和镜像加载流程属于[本地开发]
 
 ```bash
 make verify-generated
-make images TARGETOS=linux TARGETARCH=amd64 \
-  RUNTIME_IMAGE_REPOSITORY=ghcr.io/acme/breakfix RUNTIME_IMAGE_TAG=dev
+make images TARGETOS=linux TARGETARCH=amd64
 for component in server controller runtime-worker; do
-  docker push "ghcr.io/acme/breakfix-${component}:dev"
+  docker push "ghcr.io/239what475/breakfix-${component}:dev"
 done
 kubectl apply -k .
 kubectl -n breakfix-system get deployments,pods
 ```
 
 `make images` 只把已编译二进制打入 Server、Controller 与 Runtime Worker 的 distroless image，并构建 Kind 使用的 K8s base image。推送仍由部署者显式执行；不要在运行时容器中下载 Go 依赖或编译源码。
+
+`RUNTIME_IMAGE_REPOSITORY` 与部署清单默认都指向仓库 owner 的命名空间 `ghcr.io/239what475`，推送目标与 `kubectl apply -k .` 拉取的引用因此同源。改用它处时必须同步修改清单镜像引用。生产部署优先使用 git tag 触发的 Release 工作流（`.github/workflows/release.yml`）附带的 digest 锁定部署清单，而不是本节的手动 `:dev` 流程。
 
 ## Catalog 基线
 
