@@ -21,6 +21,15 @@ rules:
   - apiGroups: ["breakfix.dev"]
     resources: ["runtimeenvironments"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  # Server owns the GeneratorWorkspace CR as the cluster-side owner of every
+  # Generator workspace: it writes status, and removes the cleanup finalizer
+  # only after the cluster-external Sandbox is gone.
+  - apiGroups: ["breakfix.dev"]
+    resources: ["generatorworkspaces"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["breakfix.dev"]
+    resources: ["generatorworkspaces/status", "generatorworkspaces/finalizers"]
+    verbs: ["get", "update", "patch"]
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]
