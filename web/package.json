@@ -16,7 +16,7 @@
     "lucide-vue-next": "^1.0.0",
     "markdown-it": "^15.0.3",
     "qrcode": "^1.5.4",
-    "vue": "^3.5.43"
+    "vue": "^3.5.44"
   },
   "overrides": {
     "js-yaml": "5.4.2"
@@ -24,15 +24,15 @@
   "devDependencies": {
     "@hey-api/openapi-ts": "0.99.0",
     "@tailwindcss/vite": "^4.3.3",
-    "@types/node": "^26.6.3",
-    "@vitejs/plugin-vue": "^6.0.9",
+    "@types/node": "^26.6.5",
+    "@vitejs/plugin-vue": "^6.0.10",
     "@vue/test-utils": "^2.5.1",
     "@vue/tsconfig": "^0.9.1",
     "happy-dom": "^20.14.5",
     "tailwindcss": "^4.3.2",
     "typescript": "~6.0.2",
     "vite": "^8.3.4",
-    "vitest": "^5.0.3",
-    "vue-tsc": "^3.3.11"
+    "vitest": "^5.0.5",
+    "vue-tsc": "^3.3.13"
   }
 }
