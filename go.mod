@@ -4,7 +4,7 @@ go 1.26.7
 
 require (
 	github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.1.1
-	github.com/cloudwego/eino v0.9.21
+	github.com/cloudwego/eino v0.9.22
 	github.com/cloudwego/eino-ext/components/model/deepseek v0.1.7
 	github.com/cohesion-org/deepseek-go v1.4.0
 	github.com/docker/go-units v0.5.0
