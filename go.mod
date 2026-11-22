@@ -3,7 +3,7 @@ module github.com/breakfix/breakfix
 go 1.26.9
 
 require (
-	github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.2.0
+	github.com/alibaba/OpenSandbox/sdks/sandbox/go v1.2.1
 	github.com/cloudwego/eino v0.9.23
 	github.com/cloudwego/eino-ext/components/model/deepseek v0.1.7
 	github.com/cohesion-org/deepseek-go v1.4.0
@@ -25,7 +25,7 @@ require (
 	k8s.io/api v0.37.2
 	k8s.io/apimachinery v0.37.2
 	k8s.io/client-go v0.37.2
-	sigs.k8s.io/controller-runtime v0.25.2
+	sigs.k8s.io/controller-runtime v0.25.3
 )
 
 require (
